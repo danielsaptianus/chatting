@@ -1,0 +1,162 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// Enums
+// ============================================
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum GroupRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum NotificationType {
+  USER_REGISTERED
+  ADDED_TO_GROUP
+  REMOVED_FROM_GROUP
+  USER_JOINED_GROUP
+}
+
+// ============================================
+// User & Profile Schema
+// ============================================
+
+model User {
+  id         Int       @id @default(autoincrement())
+  email      String    @unique
+  password   String
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+  deleted_at DateTime?
+
+  // Relations
+  biodata               Biodata?
+  password_reset_tokens PasswordResetToken[]
+  created_groups        Group[]              @relation("GroupCreator")
+  group_memberships     GroupMember[]
+  sent_group_messages   GroupMessage[]
+  sent_direct_messages  DirectMessage[]      @relation("SentDirectMessages")
+  received_direct_msgs  DirectMessage[]      @relation("ReceivedDirectMessages")
+  notifications         Notification[]
+
+  @@map("users")
+}
+
+model Biodata {
+  id         Int      @id @default(autoincrement())
+  user_id    Int      @unique
+  first_name String
+  last_name  String
+  role       Role     @default(USER)
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relation
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("biodata")
+}
+
+model PasswordResetToken {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  token      String   @unique
+  expires_at DateTime
+  used       Boolean  @default(false)
+  created_at DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
+}
+
+// ============================================
+// Chat Schema
+// ============================================
+
+model Group {
+  id            Int       @id @default(autoincrement())
+  name          String
+  description   String?
+  created_by_id Int
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  deleted_at    DateTime?
+
+  creator  User           @relation("GroupCreator", fields: [created_by_id], references: [id])
+  members  GroupMember[]
+  messages GroupMessage[]
+
+  @@map("groups")
+}
+
+model GroupMember {
+  id        Int       @id @default(autoincrement())
+  group_id  Int
+  user_id   Int
+  role      GroupRole @default(MEMBER)
+  joined_at DateTime  @default(now())
+
+  group Group @relation(fields: [group_id], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([group_id, user_id])
+  @@map("group_members")
+}
+
+model GroupMessage {
+  id         Int      @id @default(autoincrement())
+  group_id   Int
+  sender_id  Int
+  content    String
+  created_at DateTime @default(now())
+
+  group  Group @relation(fields: [group_id], references: [id], onDelete: Cascade)
+  sender User  @relation(fields: [sender_id], references: [id], onDelete: Cascade)
+
+  @@map("group_messages")
+}
+
+model DirectMessage {
+  id          Int      @id @default(autoincrement())
+  sender_id   Int
+  receiver_id Int
+  content     String
+  created_at  DateTime @default(now())
+
+  sender   User @relation("SentDirectMessages", fields: [sender_id], references: [id], onDelete: Cascade)
+  receiver User @relation("ReceivedDirectMessages", fields: [receiver_id], references: [id], onDelete: Cascade)
+
+  @@map("direct_messages")
+}
+
+// ============================================
+// Notification Schema
+// ============================================
+
+model Notification {
+  id         Int              @id @default(autoincrement())
+  user_id    Int
+  type       NotificationType
+  title      String
+  message    String
+  is_read    Boolean          @default(false)
+  metadata   Json?
+  created_at DateTime         @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
