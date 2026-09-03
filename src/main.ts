@@ -55,8 +55,11 @@ async function bootstrap() {
       .setTitle('Chatting API')
       .setDescription('Chatting Backend API Documentation')
       .setVersion('1.0')
+      .addBearerAuth()
       .addTag('Authentication', 'Authentication endpoints')
       .addTag('Users', 'User management endpoints')
+      .addTag('Chatting', 'Chatting and direct messaging endpoints')
+      .addTag('Notifications', 'Notifications endpoints')
       .addTag('Health', 'Health check endpoints')
       .build();
 
@@ -77,8 +80,8 @@ async function bootstrap() {
   if (swaggerEnabled) {
     console.log(`📚 Swagger Documentaion on : http://localhost:${port}/api/${swaggerPath}`);
   }
-  console.log(`📊 Health check: http://localhost:${port}/health`);
-  console.log(`🏓 Ping endpoint: http://localhost:${port}/ping\n`);
+  console.log(`🏓 Ping endpoint: http://localhost:${port}/ping`);
+  console.log(`📊 Health check: http://localhost:${port}/health\n`);
 }
 
 bootstrap();

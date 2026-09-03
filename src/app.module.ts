@@ -17,11 +17,11 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { PrismaModule } from './common/prisma/prisma.module';
 
 // Feature modules
-import { HealthModule } from './modules/health/health.module';
-import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { UsersModule } from './modules/users/users.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { HealthModule } from './modules/health/health.module';
 
 @Module({
   imports: [
