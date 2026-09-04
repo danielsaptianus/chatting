@@ -75,6 +75,27 @@ export class ChatService {
     });
   }
 
+  async getAllGroups() {
+    return this.prisma.group.findMany({
+      where: {
+        deleted_at: null,
+      },
+      include: {
+        creator: {
+          select: { id: true, email: true, biodata: true },
+        },
+        members: {
+          include: {
+            user: {
+              select: { id: true, email: true, biodata: true },
+            },
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+  }
+
   async addMember(currentUserId: number, groupId: number, dto: AddGroupMemberDto) {
     const group = await this.prisma.group.findFirst({
       where: { id: groupId, deleted_at: null },

@@ -43,6 +43,12 @@ export class ChatController {
     return this.chatService.getMyGroups(userId);
   }
 
+  @Get('groups/all')
+  @ApiOperation({ summary: 'Get all available groups' })
+  async getAllGroups() {
+    return this.chatService.getAllGroups();
+  }
+
   @Post('groups/:id/members')
   @ApiOperation({ summary: 'Add a user to a group' })
   async addMember(

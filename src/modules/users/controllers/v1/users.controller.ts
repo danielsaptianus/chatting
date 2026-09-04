@@ -35,12 +35,13 @@ export class UsersController {
     return this.usersService.createUserByAdmin(dto);
   }
 
-  @Roles(Role.ADMIN)
   @Get()
-  @ApiOperation({ summary: 'List all users (Admin only)' })
+  @ApiOperation({ summary: 'List all users (Active users for all, includeDeleted for Admin)' })
   @ApiQuery({ name: 'includeDeleted', required: false, type: Boolean })
-  async findAll(@Query('includeDeleted') includeDeleted?: string) {
-    return this.usersService.findAll(includeDeleted === 'true');
+  async findAll(@GetUser() currentUser: any, @Query('includeDeleted') includeDeleted?: string) {
+    const userRole = currentUser.role || currentUser.biodata?.role;
+    const canIncludeDeleted = userRole === Role.ADMIN && includeDeleted === 'true';
+    return this.usersService.findAll(canIncludeDeleted);
   }
 
   @Get('me')

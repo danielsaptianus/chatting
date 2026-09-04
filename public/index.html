@@ -168,7 +168,10 @@
             <span class="search-icon">🔍</span>
             <input type="text" id="input-search-chat" placeholder="Cari percakapan...">
           </div>
-          <button id="btn-new-chat" class="btn btn-primary btn-sm" title="Buat Grup Baru">
+          <button id="btn-explore-groups" class="btn btn-secondary btn-sm" title="Jelajahi & Gabung Grup">
+            <span>🌐 Cari Grup</span>
+          </button>
+          <button id="btn-new-chat" class="btn btn-primary btn-sm" title="Aksi Baru">
             <span id="btn-new-chat-label">+ Grup</span>
           </button>
         </div>
@@ -245,6 +248,25 @@
   <!-- ============================================================== -->
   <!-- MODALS -->
   <!-- ============================================================== -->
+
+  <!-- Modal: Jelajahi & Gabung Grup -->
+  <div id="modal-explore-groups" class="modal-overlay hidden">
+    <div class="modal-dialog glass-panel">
+      <div class="modal-header">
+        <div>
+          <h3>🌐 Jelajahi Grup</h3>
+          <p class="subtitle-sm">Cari dan bergabung ke grup publik</p>
+        </div>
+        <button class="btn-icon modal-close" onclick="closeModal('modal-explore-groups')">✕</button>
+      </div>
+      <div class="modal-body" id="explore-groups-body">
+        <div class="loading-spinner-wrapper"><span class="spinner"></span></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-explore-groups')">Tutup</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Modal: Buat Grup Baru -->
   <div id="modal-create-group" class="modal-overlay hidden">

@@ -157,6 +157,10 @@ const api = {
     return this.request('/chat/groups');
   },
 
+  async getAllGroups() {
+    return this.request('/chat/groups/all');
+  },
+
   async addGroupMember(groupId, userId) {
     return this.request(`/chat/groups/${groupId}/members`, {
       method: 'POST',

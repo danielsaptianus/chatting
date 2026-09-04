@@ -155,6 +155,12 @@ function setupEventListeners() {
     }
   });
 
+  // Explore & Join Groups button
+  const btnExplore = document.getElementById('btn-explore-groups');
+  if (btnExplore) {
+    btnExplore.addEventListener('click', openExploreGroupsModal);
+  }
+
   // Create Group Form
   document.getElementById('form-create-group').addEventListener('submit', handleCreateGroup);
 
@@ -368,7 +374,12 @@ function switchTab(tab) {
   document.getElementById('tab-pc').classList.toggle('active', tab === 'pc');
 
   const btnNewChatLabel = document.getElementById('btn-new-chat-label');
-  btnNewChatLabel.textContent = tab === 'groups' ? '+ Grup' : '+ Pesan PC';
+  btnNewChatLabel.textContent = tab === 'groups' ? '+ Buat Grup' : '+ Pesan PC';
+
+  const btnExplore = document.getElementById('btn-explore-groups');
+  if (btnExplore) {
+    btnExplore.style.display = tab === 'groups' ? 'inline-flex' : 'none';
+  }
 
   loadConversations();
 }
@@ -755,18 +766,66 @@ async function handleRemoveMember(groupId, userId) {
   }
 }
 
+async function openExploreGroupsModal() {
+  openModal('modal-explore-groups');
+  const body = document.getElementById('explore-groups-body');
+  body.innerHTML = '<div class="loading-spinner-wrapper"><span class="spinner"></span></div>';
+
+  try {
+    const allGroups = await api.getAllGroups();
+    if (!allGroups || allGroups.length === 0) {
+      body.innerHTML = '<p class="empty-state">Belum ada grup yang tersedia. Buat grup pertama Anda!</p>';
+      return;
+    }
+
+    body.innerHTML = allGroups.map((g) => {
+      const isMember = (g.members || []).some((m) => m.user_id === state.currentUser?.id);
+      const initial = (g.name || 'G').charAt(0).toUpperCase();
+      const memberCount = g.members?.length || 0;
+
+      return `
+        <div class="notification-item" style="justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div class="conv-avatar group" style="width:36px; height:36px; font-size:0.9rem;">${initial}</div>
+            <div>
+              <div class="notification-title">${escapeHtml(g.name)}</div>
+              <div class="notification-message">${escapeHtml(g.description || 'Tanpa deskripsi')} • ${memberCount} Anggota</div>
+            </div>
+          </div>
+          <div>
+            ${
+              isMember
+                ? '<span class="badge-status badge-active" style="padding:4px 8px;">Sudah Bergabung</span>'
+                : `<button class="btn btn-primary btn-sm" onclick="handleJoinGroup(${g.id})">Gabung</button>`
+            }
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    body.innerHTML = `<p class="empty-state">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function handleJoinGroup(groupId) {
+  try {
+    await api.joinGroup(groupId);
+    closeModal('modal-explore-groups');
+    showToast('Bergabung ke Grup', 'Anda berhasil bergabung ke grup!', 'success', '🎉');
+    await loadConversations();
+    selectGroupChat(groupId);
+  } catch (err) {
+    showToast('Gagal Bergabung', err.message, 'error', '❌');
+  }
+}
+
 async function openUserSelectModalForPC() {
   try {
     const users = await api.getUsers();
-    state.usersCache = users;
+    state.usersCache = users || [];
 
     // Filter out self
-    const otherUsers = users.filter((u) => u.id !== state.currentUser?.id);
-
-    const userNameList = otherUsers.map((u) => {
-      const name = u.biodata ? `${u.biodata.first_name} ${u.biodata.last_name}` : u.email;
-      return `<button class="btn btn-outline btn-block" style="justify-content:flex-start; margin-bottom:6px;" onclick="selectPCChat(${u.id}); closeModal('modal-user-picker');">${escapeHtml(name)} (${escapeHtml(u.email)})</button>`;
-    }).join('');
+    const otherUsers = (users || []).filter((u) => u.id !== state.currentUser?.id);
 
     let pickerModal = document.getElementById('modal-user-picker');
     if (!pickerModal) {
@@ -776,19 +835,58 @@ async function openUserSelectModalForPC() {
       document.body.appendChild(pickerModal);
     }
 
+    const renderList = (filter = '') => {
+      const filtered = otherUsers.filter((u) => {
+        const name = u.biodata ? `${u.biodata.first_name} ${u.biodata.last_name}` : u.email;
+        return name.toLowerCase().includes(filter) || u.email.toLowerCase().includes(filter);
+      });
+
+      if (filtered.length === 0) {
+        return '<p class="empty-state">Tidak ada pengguna yang cocok.</p>';
+      }
+
+      return filtered.map((u) => {
+        const name = u.biodata ? `${u.biodata.first_name} ${u.biodata.last_name}` : u.email;
+        const role = u.biodata?.role || 'USER';
+        return `
+          <button class="btn btn-outline btn-block" style="justify-content:space-between; margin-bottom:6px; text-align:left;" onclick="selectPCChat(${u.id}); closeModal('modal-user-picker');">
+            <div>
+              <strong>${escapeHtml(name)}</strong>
+              <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(u.email)}</div>
+            </div>
+            <span class="user-role-badge">${role}</span>
+          </button>
+        `;
+      }).join('');
+    };
+
     pickerModal.innerHTML = `
       <div class="modal-dialog glass-panel">
         <div class="modal-header">
-          <h3>Pilih Pengguna untuk Pesan Pribadi</h3>
+          <div>
+            <h3>Pilih Pengguna untuk Pesan Pribadi (PC)</h3>
+            <p class="subtitle-sm">Mulai obrolan 1-on-1 dengan pengguna lain</p>
+          </div>
           <button class="btn-icon" onclick="closeModal('modal-user-picker')">✕</button>
         </div>
-        <div class="modal-body" style="max-height:360px; overflow-y:auto;">
-          ${userNameList || '<p class="empty-state">Tidak ada pengguna lain terdaftar.</p>'}
+        <div class="modal-body">
+          <div style="margin-bottom:12px;">
+            <input type="text" id="pc-user-search" placeholder="Cari nama atau email pengguna..." style="padding:8px 12px; font-size:0.85rem;">
+          </div>
+          <div id="pc-user-list-container" style="max-height:320px; overflow-y:auto;">
+            ${renderList()}
+          </div>
         </div>
       </div>
     `;
 
     pickerModal.classList.remove('hidden');
+
+    const searchInput = document.getElementById('pc-user-search');
+    searchInput.focus();
+    searchInput.addEventListener('input', (e) => {
+      document.getElementById('pc-user-list-container').innerHTML = renderList(e.target.value.toLowerCase().trim());
+    });
   } catch (err) {
     showToast('Error', err.message, 'error');
   }
