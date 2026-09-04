@@ -202,6 +202,30 @@ const api = {
     });
   },
 
+  async leaveGroup(groupId, userId) {
+    return this.removeGroupMember(groupId, userId);
+  },
+
+  async getGroupInviteCode(groupId) {
+    return this.request(`/chat/groups/${groupId}/invite-code`);
+  },
+
+  async revokeGroupInviteCode(groupId) {
+    return this.request(`/chat/groups/${groupId}/revoke-invite`, {
+      method: 'POST',
+    });
+  },
+
+  async previewGroupByInvite(code) {
+    return this.request(`/chat/groups/invite/${code}`);
+  },
+
+  async requestJoinByInvite(code) {
+    return this.request(`/chat/groups/invite/${code}/request`, {
+      method: 'POST',
+    });
+  },
+
   async sendGroupMessage(groupId, content) {
     return this.request(`/chat/groups/${groupId}/messages`, {
       method: 'POST',

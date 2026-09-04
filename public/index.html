@@ -168,8 +168,8 @@
             <span class="search-icon">🔍</span>
             <input type="text" id="input-search-chat" placeholder="Cari percakapan...">
           </div>
-          <button id="btn-explore-groups" class="btn btn-secondary btn-sm" title="Jelajahi & Gabung Grup">
-            <span>🌐 Cari Grup</span>
+          <button id="btn-join-by-link" class="btn btn-secondary btn-sm" title="Gabung via Tautan Undangan">
+            <span>🔗 Gabung Link</span>
           </button>
           <button id="btn-new-chat" class="btn btn-primary btn-sm" title="Aksi Baru">
             <span id="btn-new-chat-label">+ Grup</span>
@@ -249,21 +249,72 @@
   <!-- MODALS -->
   <!-- ============================================================== -->
 
-  <!-- Modal: Jelajahi & Gabung Grup -->
-  <div id="modal-explore-groups" class="modal-overlay hidden">
+  <!-- Modal: Gabung via Tautan Undangan (ala WhatsApp) -->
+  <div id="modal-join-by-link" class="modal-overlay hidden">
     <div class="modal-dialog glass-panel">
       <div class="modal-header">
         <div>
-          <h3>🌐 Jelajahi Grup</h3>
-          <p class="subtitle-sm">Cari dan bergabung ke grup publik</p>
+          <h3>🔗 Gabung via Tautan Undangan</h3>
+          <p class="subtitle-sm">Masukkan tautan atau kode undangan untuk meminta bergabung ke grup.</p>
         </div>
-        <button class="btn-icon modal-close" onclick="closeModal('modal-explore-groups')">✕</button>
+        <button class="btn-icon modal-close" onclick="closeModal('modal-join-by-link')">✕</button>
       </div>
-      <div class="modal-body" id="explore-groups-body">
-        <div class="loading-spinner-wrapper"><span class="spinner"></span></div>
+      <div class="modal-body">
+        <form id="form-check-invite" onsubmit="handleCheckInvite(event)">
+          <div class="form-group">
+            <label for="input-invite-code">Tautan atau Kode Undangan Grup</label>
+            <div style="display:flex; gap:8px;">
+              <input type="text" id="input-invite-code" required placeholder="Contoh: inv_abc123 atau tempel tautan...">
+              <button type="submit" class="btn btn-primary" style="white-space:nowrap;">Cari Grup</button>
+            </div>
+          </div>
+        </form>
+
+        <!-- Preview Card -->
+        <div id="invite-preview-card" class="hidden" style="margin-top:16px; padding:16px; border-radius:12px; background:rgba(255,255,255,0.03); border:1px solid var(--border-color); text-align:center;">
+          <div class="conv-avatar group" id="invite-preview-avatar" style="width:56px; height:56px; margin:0 auto 12px; font-size:1.4rem;">G</div>
+          <h3 id="invite-preview-name" style="margin-bottom:4px;">Nama Grup</h3>
+          <p id="invite-preview-desc" style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:8px;">Deskripsi</p>
+          <div id="invite-preview-meta" style="font-size:0.8rem; color:var(--text-muted); margin-bottom:16px;">0 Anggota</div>
+          <div id="invite-preview-action">
+            <!-- Action button populated dynamically -->
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-explore-groups')">Tutup</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-join-by-link')">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Bagikan Tautan Undangan Grup (Khusus Admin/Owner Grup) -->
+  <div id="modal-group-invite" class="modal-overlay hidden">
+    <div class="modal-dialog glass-panel">
+      <div class="modal-header">
+        <div>
+          <h3>🔗 Tautan Undangan Grup</h3>
+          <p class="subtitle-sm">Bagikan tautan ini kepada calon anggota grup.</p>
+        </div>
+        <button class="btn-icon modal-close" onclick="closeModal('modal-group-invite')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Tautan Undangan</label>
+          <div style="display:flex; gap:8px;">
+            <input type="text" id="input-display-invite-link" readonly style="background:rgba(0,0,0,0.2);">
+            <button class="btn btn-primary" onclick="copyInviteLink()">📋 Salin</button>
+          </div>
+        </div>
+        <div style="padding:10px 14px; background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.2); border-radius:8px; font-size:0.8rem; color:var(--text-secondary); line-height:1.5;">
+          ℹ️ Sesuai ketentuan WhatsApp, calon anggota yang membuka tautan ini harus disetujui terlebih dahulu oleh Admin/Owner grup sebelum dapat masuk.
+        </div>
+        <div style="margin-top:16px; border-top:1px solid var(--border-color); padding-top:12px;">
+          <button class="btn btn-outline btn-sm" style="color:var(--danger); border-color:var(--danger);" onclick="handleRevokeInviteLink()">🔄 Tarik Tautan (Reset Link)</button>
+          <p style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Menarik tautan akan membatalkan tautan lama sehingga tidak dapat digunakan lagi.</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-group-invite')">Tutup</button>
       </div>
     </div>
   </div>

@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { PrismaService } from '@common/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
@@ -26,10 +27,12 @@ export class ChatService {
   // ====================================================================
 
   async createGroup(userId: number, dto: CreateGroupDto) {
+    const inviteCode = 'inv_' + crypto.randomBytes(5).toString('hex');
     const group = await this.prisma.group.create({
       data: {
         name: dto.name,
         description: dto.description,
+        invite_code: inviteCode,
         created_by_id: userId,
         members: {
           create: {
@@ -75,7 +78,13 @@ export class ChatService {
     });
   }
 
-  async getAllGroups() {
+  async getAllGroups(userId?: number) {
+    if (userId) {
+      const user = await this.prisma.biodata.findUnique({ where: { user_id: userId } });
+      if (user?.role !== Role.ADMIN) {
+        throw new ForbiddenException('Daftar seluruh grup hanya dapat diakses oleh Administrator');
+      }
+    }
     return this.prisma.group.findMany({
       where: {
         deleted_at: null,
@@ -110,10 +119,15 @@ export class ChatService {
       throw new NotFoundException('Group not found');
     }
 
-    // Check if requester is member of group
-    const isMember = group.members.some((m) => m.user_id === currentUserId);
-    if (!isMember) {
-      throw new ForbiddenException('You must be a member of this group to add someone');
+    // Check if requester is owner/admin of group or system admin (WhatsApp rule)
+    const requesterMember = group.members.find((m) => m.user_id === currentUserId);
+    const currentUser = await this.prisma.biodata.findUnique({
+      where: { user_id: currentUserId },
+    });
+    const isStaff = requesterMember && (requesterMember.role === GroupRole.OWNER || requesterMember.role === GroupRole.ADMIN);
+    const isSystemAdmin = currentUser?.role === Role.ADMIN;
+    if (!isStaff && !isSystemAdmin) {
+      throw new ForbiddenException('Hanya admin atau owner grup yang dapat menambahkan anggota');
     }
 
     // Check if target is already in group
@@ -388,10 +402,118 @@ export class ChatService {
     return { message: 'Permintaan bergabung ditolak' };
   }
 
-  async removeMember(currentUserId: number, groupId: number, targetUserId: number) {
+  async getInviteCode(currentUserId: number, groupId: number) {
     const group = await this.prisma.group.findFirst({
       where: { id: groupId, deleted_at: null },
       include: { members: true },
+    });
+
+    if (!group) {
+      throw new NotFoundException('Group not found');
+    }
+
+    const requester = group.members.find((m) => m.user_id === currentUserId);
+    const currentUser = await this.prisma.biodata.findUnique({
+      where: { user_id: currentUserId },
+    });
+
+    const isStaff = requester && (requester.role === GroupRole.OWNER || requester.role === GroupRole.ADMIN);
+    const isSystemAdmin = currentUser?.role === Role.ADMIN;
+
+    if (!isStaff && !isSystemAdmin) {
+      throw new ForbiddenException('Hanya admin atau owner grup yang dapat melihat tautan undangan');
+    }
+
+    let inviteCode = group.invite_code;
+    if (!inviteCode) {
+      inviteCode = 'inv_' + crypto.randomBytes(5).toString('hex');
+      await this.prisma.group.update({
+        where: { id: groupId },
+        data: { invite_code: inviteCode },
+      });
+    }
+
+    return { invite_code: inviteCode };
+  }
+
+  async revokeInviteCode(currentUserId: number, groupId: number) {
+    const group = await this.prisma.group.findFirst({
+      where: { id: groupId, deleted_at: null },
+      include: { members: true },
+    });
+
+    if (!group) {
+      throw new NotFoundException('Group not found');
+    }
+
+    const requester = group.members.find((m) => m.user_id === currentUserId);
+    const currentUser = await this.prisma.biodata.findUnique({
+      where: { user_id: currentUserId },
+    });
+
+    const isStaff = requester && (requester.role === GroupRole.OWNER || requester.role === GroupRole.ADMIN);
+    const isSystemAdmin = currentUser?.role === Role.ADMIN;
+
+    if (!isStaff && !isSystemAdmin) {
+      throw new ForbiddenException('Hanya admin atau owner grup yang dapat menarik tautan undangan');
+    }
+
+    const newInviteCode = 'inv_' + crypto.randomBytes(5).toString('hex');
+    await this.prisma.group.update({
+      where: { id: groupId },
+      data: { invite_code: newInviteCode },
+    });
+
+    return {
+      invite_code: newInviteCode,
+      message: 'Tautan undangan grup berhasil diperbarui',
+    };
+  }
+
+  async previewGroupByInvite(code: string) {
+    const group = await this.prisma.group.findFirst({
+      where: { invite_code: code, deleted_at: null },
+      include: {
+        members: { select: { user_id: true } },
+        join_requests: {
+          where: { status: JoinRequestStatus.PENDING },
+          select: { user_id: true },
+        },
+      },
+    });
+
+    if (!group) {
+      throw new NotFoundException('Tautan undangan tidak valid atau sudah ditarik');
+    }
+
+    return {
+      id: group.id,
+      name: group.name,
+      description: group.description,
+      invite_code: group.invite_code,
+      member_count: group.members.length,
+      member_ids: group.members.map((m) => m.user_id),
+      pending_request_user_ids: group.join_requests.map((r) => r.user_id),
+      created_at: group.created_at,
+    };
+  }
+
+  async requestJoinByInvite(userId: number, code: string) {
+    const group = await this.prisma.group.findFirst({
+      where: { invite_code: code, deleted_at: null },
+    });
+
+    if (!group) {
+      throw new NotFoundException('Tautan undangan tidak valid atau sudah ditarik');
+    }
+
+    return this.requestJoinGroup(userId, group.id);
+  }
+
+  async removeMember(currentUserId: number, groupId: number, targetUserId: number) {
+    const group = await this.prisma.group.findFirst({
+      where: { id: groupId, deleted_at: null },
+      include: { members: { include: { user: { include: { biodata: true } } } } },
     });
 
     if (!group) {
@@ -403,14 +525,21 @@ export class ChatService {
       throw new ForbiddenException('You are not a member of this group');
     }
 
+    const isSelfLeaving = currentUserId === targetUserId;
+
     // Only OWNER or ADMIN of group can remove others, or self can leave
     if (
-      currentUserId !== targetUserId &&
+      !isSelfLeaving &&
       requesterMember.role !== GroupRole.OWNER &&
       requesterMember.role !== GroupRole.ADMIN
     ) {
       throw new ForbiddenException('Only group owner or admin can remove members');
     }
+
+    const targetMember = group.members.find((m) => m.user_id === targetUserId);
+    const targetName = targetMember?.user?.biodata
+      ? `${targetMember.user.biodata.first_name} ${targetMember.user.biodata.last_name}`
+      : targetMember?.user?.email || `User ${targetUserId}`;
 
     await this.prisma.groupMember.deleteMany({
       where: {
@@ -419,16 +548,31 @@ export class ChatService {
       },
     });
 
-    // Fire notification: "notif dikeluarkan dari grup"
-    await this.notificationsService.createAndSend({
-      userId: targetUserId,
-      type: NotificationType.REMOVED_FROM_GROUP,
-      title: 'Dikeluarkan dari Grup',
-      message: `Anda telah dikeluarkan dari grup "${group.name}".`,
-      metadata: { groupId: group.id, groupName: group.name },
-    });
-
-    return { message: `User ${targetUserId} removed from group ${groupId}` };
+    if (isSelfLeaving) {
+      await this.notificationsService.createForGroupMembers(groupId, {
+        type: NotificationType.REMOVED_FROM_GROUP,
+        title: 'Anggota Keluar',
+        message: `${targetName} telah keluar dari grup "${group.name}".`,
+        metadata: { groupId: group.id, groupName: group.name, userId: targetUserId },
+      });
+      return { message: `Anda telah keluar dari grup "${group.name}"` };
+    } else {
+      await this.notificationsService.createAndSend({
+        userId: targetUserId,
+        type: NotificationType.REMOVED_FROM_GROUP,
+        title: 'Dikeluarkan dari Grup',
+        message: `Anda telah dikeluarkan dari grup "${group.name}".`,
+        metadata: { groupId: group.id, groupName: group.name },
+      });
+      await this.notificationsService.createForGroupMembers(groupId, {
+        type: NotificationType.REMOVED_FROM_GROUP,
+        title: 'Anggota Dikeluarkan',
+        message: `${targetName} telah dikeluarkan dari grup "${group.name}" oleh admin.`,
+        excludeUserId: targetUserId,
+        metadata: { groupId: group.id, groupName: group.name, userId: targetUserId },
+      });
+      return { message: `User ${targetUserId} removed from group ${groupId}` };
+    }
   }
 
   async sendGroupMessage(userId: number, groupId: number, dto: SendGroupMessageDto) {

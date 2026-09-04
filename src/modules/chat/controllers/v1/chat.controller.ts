@@ -44,9 +44,42 @@ export class ChatController {
   }
 
   @Get('groups/all')
-  @ApiOperation({ summary: 'Get all available groups' })
-  async getAllGroups() {
-    return this.chatService.getAllGroups();
+  @ApiOperation({ summary: 'Get all groups (Admin only)' })
+  async getAllGroups(@GetUser('userId') userId: number) {
+    return this.chatService.getAllGroups(userId);
+  }
+
+  @Get('groups/invite/:code')
+  @ApiOperation({ summary: 'Preview group by invite code' })
+  async previewGroupByInvite(@Param('code') code: string) {
+    return this.chatService.previewGroupByInvite(code);
+  }
+
+  @Post('groups/invite/:code/request')
+  @ApiOperation({ summary: 'Request to join group via invite code' })
+  async requestJoinByInvite(
+    @GetUser('userId') userId: number,
+    @Param('code') code: string,
+  ) {
+    return this.chatService.requestJoinByInvite(userId, code);
+  }
+
+  @Get('groups/:id/invite-code')
+  @ApiOperation({ summary: 'Get group invite code (Owner/Admin only)' })
+  async getInviteCode(
+    @GetUser('userId') currentUserId: number,
+    @Param('id', ParseIntPipe) groupId: number,
+  ) {
+    return this.chatService.getInviteCode(currentUserId, groupId);
+  }
+
+  @Post('groups/:id/revoke-invite')
+  @ApiOperation({ summary: 'Revoke and regenerate group invite code (Owner/Admin only)' })
+  async revokeInviteCode(
+    @GetUser('userId') currentUserId: number,
+    @Param('id', ParseIntPipe) groupId: number,
+  ) {
+    return this.chatService.revokeInviteCode(currentUserId, groupId);
   }
 
   @Post('groups/:id/members')

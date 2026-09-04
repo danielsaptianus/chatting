@@ -155,11 +155,14 @@ function setupEventListeners() {
     }
   });
 
-  // Explore & Join Groups button
-  const btnExplore = document.getElementById('btn-explore-groups');
-  if (btnExplore) {
-    btnExplore.addEventListener('click', openExploreGroupsModal);
+  // Join by Invite Link button (WhatsApp style)
+  const btnJoinByLink = document.getElementById('btn-join-by-link');
+  if (btnJoinByLink) {
+    btnJoinByLink.addEventListener('click', () => openJoinByLinkModal());
   }
+
+  // Check URL hash for direct invite links (#invite=xyz)
+  checkUrlInviteLink();
 
   // Create Group Form
   document.getElementById('form-create-group').addEventListener('submit', handleCreateGroup);
@@ -390,9 +393,9 @@ function switchTab(tab) {
   const btnNewChatLabel = document.getElementById('btn-new-chat-label');
   btnNewChatLabel.textContent = tab === 'groups' ? '+ Buat Grup' : '+ Pesan PC';
 
-  const btnExplore = document.getElementById('btn-explore-groups');
-  if (btnExplore) {
-    btnExplore.style.display = tab === 'groups' ? 'inline-flex' : 'none';
+  const btnJoinByLink = document.getElementById('btn-join-by-link');
+  if (btnJoinByLink) {
+    btnJoinByLink.style.display = tab === 'groups' ? 'inline-flex' : 'none';
   }
 
   loadConversations();
@@ -511,10 +514,16 @@ async function selectGroupChat(groupId) {
   document.getElementById('active-chat-title').textContent = group.name;
   document.getElementById('active-chat-subtitle').textContent = `${group.members?.length || 0} Anggota`;
 
+  const currentMember = (group.members || []).find((m) => m.user_id === state.currentUser?.id);
+  const isStaff =
+    (currentMember && (currentMember.role === 'OWNER' || currentMember.role === 'ADMIN')) ||
+    state.currentUser?.biodata?.role === 'ADMIN';
+
   // Header action buttons
   const actionsContainer = document.getElementById('chat-header-actions');
   actionsContainer.innerHTML = `
-    <button class="btn btn-outline btn-sm" onclick="openAddMemberModal(${groupId})">➕ Tambah Member</button>
+    ${isStaff ? `<button class="btn btn-outline btn-sm" onclick="openAddMemberModal(${groupId})">➕ Tambah Member</button>` : ''}
+    ${isStaff ? `<button class="btn btn-outline btn-sm" onclick="openGroupInviteModal(${groupId})">🔗 Tautan Undangan</button>` : ''}
     <button class="btn btn-outline btn-sm" onclick="toggleInfoDrawer()">ℹ️ Detail</button>
   `;
 
@@ -701,10 +710,18 @@ function renderGroupInfoDrawer(group) {
       <h4 style="font-size:0.9rem; margin-bottom:4px;">Deskripsi:</h4>
       <p style="font-size:0.8rem; color:var(--text-secondary);">${escapeHtml(group.description || 'Tidak ada deskripsi.')}</p>
     </div>
+    ${isStaff ? `
+      <div style="margin-bottom:16px;">
+        <button class="btn btn-outline btn-sm" style="width:100%; justify-content:center;" onclick="openGroupInviteModal(${group.id})">🔗 Bagikan Tautan Undangan</button>
+      </div>
+    ` : ''}
     ${joinRequestsSectionHtml}
     <h4 style="font-size:0.9rem; margin-bottom:8px;">Daftar Anggota (${group.members?.length || 0}):</h4>
     <div style="display:flex; flex-direction:column; gap:6px;">
       ${memberListHtml}
+    </div>
+    <div style="margin-top:20px; border-top:1px solid var(--border-color); padding-top:14px;">
+      <button class="btn btn-outline btn-sm" style="color:var(--danger); border-color:var(--danger); width:100%; justify-content:center;" onclick="handleLeaveGroup(${group.id})">🚪 Keluar dari Grup</button>
     </div>
   `;
 
@@ -876,60 +893,162 @@ async function handleRemoveMember(groupId, userId) {
   }
 }
 
-async function openExploreGroupsModal() {
-  openModal('modal-explore-groups');
-  const body = document.getElementById('explore-groups-body');
-  body.innerHTML = '<div class="loading-spinner-wrapper"><span class="spinner"></span></div>';
-
-  try {
-    const allGroups = await api.getAllGroups();
-    if (!allGroups || allGroups.length === 0) {
-      body.innerHTML = '<p class="empty-state">Belum ada grup yang tersedia. Buat grup pertama Anda!</p>';
-      return;
+function openJoinByLinkModal(initialCode = '') {
+  openModal('modal-join-by-link');
+  const input = document.getElementById('input-invite-code');
+  const previewCard = document.getElementById('invite-preview-card');
+  if (previewCard) previewCard.classList.add('hidden');
+  if (input) {
+    input.value = initialCode || '';
+    if (initialCode) {
+      handleCheckInvite();
     }
-
-    body.innerHTML = allGroups.map((g) => {
-      const isMember = (g.members || []).some((m) => m.user_id === state.currentUser?.id);
-      const hasPending = (g.join_requests || []).some((r) => r.user_id === state.currentUser?.id);
-      const initial = (g.name || 'G').charAt(0).toUpperCase();
-      const memberCount = g.members?.length || 0;
-
-      let actionHtml = '';
-      if (isMember) {
-        actionHtml = '<span class="badge-status badge-active" style="padding:4px 8px;">Sudah Bergabung</span>';
-      } else if (hasPending) {
-        actionHtml = '<span class="badge-status" style="padding:4px 8px; background:rgba(234,179,8,0.15); color:#eab308; border:1px solid rgba(234,179,8,0.3);">⏳ Menunggu Persetujuan</span>';
-      } else {
-        actionHtml = `<button class="btn btn-primary btn-sm" onclick="handleJoinGroup(${g.id})">Minta Bergabung</button>`;
-      }
-
-      return `
-        <div class="notification-item" style="justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <div style="display:flex; align-items:center; gap:10px;">
-            <div class="conv-avatar group" style="width:36px; height:36px; font-size:0.9rem;">${initial}</div>
-            <div>
-              <div class="notification-title">${escapeHtml(g.name)}</div>
-              <div class="notification-message">${escapeHtml(g.description || 'Tanpa deskripsi')} • ${memberCount} Anggota</div>
-            </div>
-          </div>
-          <div>
-            ${actionHtml}
-          </div>
-        </div>
-      `;
-    }).join('');
-  } catch (err) {
-    body.innerHTML = `<p class="empty-state">${escapeHtml(err.message)}</p>`;
   }
 }
 
-async function handleJoinGroup(groupId) {
+async function handleCheckInvite(e) {
+  if (e) e.preventDefault();
+  const input = document.getElementById('input-invite-code');
+  let rawValue = (input?.value || '').trim();
+  if (!rawValue) return;
+
+  // Extract code if user pasted a link
+  let code = rawValue;
+  if (rawValue.includes('#invite=')) {
+    code = rawValue.split('#invite=')[1].split('&')[0];
+  } else if (rawValue.includes('/invite/')) {
+    code = rawValue.split('/invite/')[1].split('?')[0].split('#')[0];
+  }
+
+  const previewCard = document.getElementById('invite-preview-card');
+  const previewAvatar = document.getElementById('invite-preview-avatar');
+  const previewName = document.getElementById('invite-preview-name');
+  const previewDesc = document.getElementById('invite-preview-desc');
+  const previewMeta = document.getElementById('invite-preview-meta');
+  const previewAction = document.getElementById('invite-preview-action');
+
+  if (!previewCard) return;
+
+  previewCard.classList.remove('hidden');
+  previewName.textContent = 'Memeriksa grup...';
+  previewDesc.textContent = '';
+  previewMeta.textContent = '';
+  previewAction.innerHTML = '<span class="spinner" style="width:20px;height:20px;display:inline-block;"></span>';
+
   try {
-    const res = await api.requestJoinGroup(groupId);
+    const group = await api.previewGroupByInvite(code);
+    const initial = (group.name || 'G').charAt(0).toUpperCase();
+    previewAvatar.textContent = initial;
+    previewName.textContent = group.name;
+    previewDesc.textContent = group.description || 'Tidak ada deskripsi grup.';
+    previewMeta.textContent = `${group.member_count} Anggota`;
+
+    const isMember = (group.member_ids || []).includes(state.currentUser?.id);
+    const isPending = (group.pending_request_user_ids || []).includes(state.currentUser?.id);
+
+    if (isMember) {
+      previewAction.innerHTML = `
+        <span class="badge-status badge-active" style="padding:6px 14px; font-size:0.85rem;">Sudah Bergabung</span>
+        <div style="margin-top:8px;">
+          <button class="btn btn-secondary btn-sm" onclick="closeModal('modal-join-by-link'); selectGroupChat(${group.id});">Buka Obrolan</button>
+        </div>
+      `;
+    } else if (isPending) {
+      previewAction.innerHTML = `
+        <span class="badge-status" style="padding:6px 14px; font-size:0.85rem; background:rgba(234,179,8,0.15); color:#eab308; border:1px solid rgba(234,179,8,0.3);">⏳ Permintaan Menunggu Persetujuan</span>
+      `;
+    } else {
+      previewAction.innerHTML = `
+        <button class="btn btn-primary" onclick="handleRequestJoinByInvite('${escapeHtml(code)}')">Minta Bergabung</button>
+      `;
+    }
+  } catch (err) {
+    previewName.textContent = 'Grup Tidak Ditemukan';
+    previewDesc.textContent = err.message || 'Tautan undangan tidak valid atau sudah ditarik oleh admin.';
+    previewMeta.textContent = '';
+    previewAction.innerHTML = '';
+  }
+}
+
+async function handleRequestJoinByInvite(code) {
+  try {
+    const res = await api.requestJoinByInvite(code);
     showToast('Permintaan Terkirim', res.message || 'Permintaan bergabung telah dikirim ke Admin/Owner grup!', 'success', '⏳');
-    renderExploreGroupsModal();
+    const previewAction = document.getElementById('invite-preview-action');
+    if (previewAction) {
+      previewAction.innerHTML = `
+        <span class="badge-status" style="padding:6px 14px; font-size:0.85rem; background:rgba(234,179,8,0.15); color:#eab308; border:1px solid rgba(234,179,8,0.3);">⏳ Permintaan Menunggu Persetujuan</span>
+      `;
+    }
   } catch (err) {
     showToast('Gagal Mengajukan', err.message, 'error', '❌');
+  }
+}
+
+async function openGroupInviteModal(groupId) {
+  try {
+    const res = await api.getGroupInviteCode(groupId);
+    state.currentInviteGroupId = groupId;
+    const inviteLink = `${window.location.origin}/#invite=${res.invite_code}`;
+    document.getElementById('input-display-invite-link').value = inviteLink;
+    openModal('modal-group-invite');
+  } catch (err) {
+    showToast('Gagal Mengambil Tautan', err.message, 'error', '❌');
+  }
+}
+
+async function copyInviteLink() {
+  const input = document.getElementById('input-display-invite-link');
+  if (!input || !input.value) return;
+
+  try {
+    await navigator.clipboard.writeText(input.value);
+    showToast('Tautan Disalin', 'Tautan undangan berhasil disalin ke clipboard!', 'success', '📋');
+  } catch {
+    input.select();
+    document.execCommand('copy');
+    showToast('Tautan Disalin', 'Tautan undangan berhasil disalin ke clipboard!', 'success', '📋');
+  }
+}
+
+async function handleRevokeInviteLink() {
+  if (!state.currentInviteGroupId) return;
+  if (!confirm('Apakah Anda yakin ingin menarik tautan ini? Calon anggota tidak akan bisa menggunakan tautan lama lagi.')) return;
+
+  try {
+    const res = await api.revokeGroupInviteCode(state.currentInviteGroupId);
+    const newLink = `${window.location.origin}/#invite=${res.invite_code}`;
+    document.getElementById('input-display-invite-link').value = newLink;
+    showToast('Tautan Diperbarui', res.message || 'Tautan undangan lama telah ditarik dan tautan baru telah dibuat.', 'success', '🔄');
+  } catch (err) {
+    showToast('Gagal Menarik Tautan', err.message, 'error', '❌');
+  }
+}
+
+async function handleLeaveGroup(groupId) {
+  if (!confirm('Apakah Anda yakin ingin keluar dari grup ini?')) return;
+
+  try {
+    await api.leaveGroup(groupId, state.currentUser?.id);
+    showToast('Keluar Grup', 'Anda telah keluar dari grup.', 'info', '🚪');
+    const drawer = document.getElementById('info-drawer');
+    if (drawer) drawer.classList.add('hidden');
+    document.getElementById('chat-active-window').classList.add('hidden');
+    document.getElementById('chat-empty-state').classList.remove('hidden');
+    state.activeChat = null;
+    await loadConversations();
+  } catch (err) {
+    showToast('Gagal Keluar Grup', err.message, 'error', '❌');
+  }
+}
+
+function checkUrlInviteLink() {
+  const hash = window.location.hash;
+  if (hash && hash.startsWith('#invite=')) {
+    const code = hash.replace('#invite=', '').trim();
+    if (code) {
+      openJoinByLinkModal(code);
+    }
   }
 }
 
