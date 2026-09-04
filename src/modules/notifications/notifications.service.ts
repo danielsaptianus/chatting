@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@common/prisma/prisma.service';
-import { NotificationType } from '@prisma/client';
+import { NotificationType, GroupRole } from '@prisma/client';
 import { NotificationsGateway } from './notifications.gateway';
 
 @Injectable()
@@ -54,6 +54,37 @@ export class NotificationsService {
 
     const notifications = await Promise.all(
       targetMembers.map((member) =>
+        this.createAndSend({
+          userId: member.user_id,
+          type: data.type,
+          title: data.title,
+          message: data.message,
+          metadata: data.metadata,
+        }),
+      ),
+    );
+
+    return notifications;
+  }
+
+  async createForGroupStaff(
+    groupId: number,
+    data: {
+      type: NotificationType;
+      title: string;
+      message: string;
+      metadata?: any;
+    },
+  ) {
+    const staff = await this.prisma.groupMember.findMany({
+      where: {
+        group_id: groupId,
+        role: { in: [GroupRole.OWNER, GroupRole.ADMIN] },
+      },
+    });
+
+    const notifications = await Promise.all(
+      staff.map((member) =>
         this.createAndSend({
           userId: member.user_id,
           type: data.type,

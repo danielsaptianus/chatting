@@ -11,7 +11,7 @@ import { CreateGroupDto } from './dto/create-group.dto';
 import { AddGroupMemberDto } from './dto/add-group-member.dto';
 import { SendGroupMessageDto } from './dto/send-group-message.dto';
 import { SendDirectMessageDto } from './dto/send-direct-message.dto';
-import { GroupRole, NotificationType } from '@prisma/client';
+import { GroupRole, NotificationType, JoinRequestStatus, Role } from '@prisma/client';
 
 @Injectable()
 export class ChatService {
@@ -91,6 +91,10 @@ export class ChatService {
             },
           },
         },
+        join_requests: {
+          where: { status: JoinRequestStatus.PENDING },
+          select: { id: true, user_id: true, status: true },
+        },
       },
       orderBy: { created_at: 'desc' },
     });
@@ -141,13 +145,11 @@ export class ChatService {
     return member;
   }
 
-  async joinGroup(userId: number, groupId: number) {
+  async requestJoinGroup(userId: number, groupId: number) {
     const group = await this.prisma.group.findFirst({
       where: { id: groupId, deleted_at: null },
       include: {
-        members: {
-          include: { user: { select: { id: true, email: true, biodata: true } } },
-        },
+        members: true,
       },
     });
 
@@ -160,10 +162,151 @@ export class ChatService {
       throw new BadRequestException('You are already a member of this group');
     }
 
-    const member = await this.prisma.groupMember.create({
-      data: {
+    const existingPending = await this.prisma.groupJoinRequest.findFirst({
+      where: {
         group_id: groupId,
         user_id: userId,
+        status: JoinRequestStatus.PENDING,
+      },
+    });
+
+    if (existingPending) {
+      throw new BadRequestException('Permintaan bergabung Anda sedang menunggu persetujuan admin/owner');
+    }
+
+    const joinRequest = await this.prisma.groupJoinRequest.upsert({
+      where: {
+        group_id_user_id: { group_id: groupId, user_id: userId },
+      },
+      update: {
+        status: JoinRequestStatus.PENDING,
+      },
+      create: {
+        group_id: groupId,
+        user_id: userId,
+        status: JoinRequestStatus.PENDING,
+      },
+      include: {
+        user: { select: { id: true, email: true, biodata: true } },
+      },
+    });
+
+    const requesterName = joinRequest.user?.biodata
+      ? `${joinRequest.user.biodata.first_name} ${joinRequest.user.biodata.last_name}`
+      : joinRequest.user.email;
+
+    // Send notification to group owner and admin(s)
+    await this.notificationsService.createForGroupStaff(groupId, {
+      type: NotificationType.JOIN_REQUEST_RECEIVED,
+      title: 'Permintaan Bergabung Grup',
+      message: `${requesterName} meminta izin untuk bergabung ke grup "${group.name}".`,
+      metadata: {
+        groupId: group.id,
+        groupName: group.name,
+        requestId: joinRequest.id,
+        userId,
+        requesterName,
+      },
+    });
+
+    return {
+      message: 'Permintaan bergabung telah dikirimkan, menunggu persetujuan admin/owner grup',
+      joinRequest,
+    };
+  }
+
+  async joinGroup(userId: number, groupId: number) {
+    return this.requestJoinGroup(userId, groupId);
+  }
+
+  async getJoinRequests(currentUserId: number, groupId: number) {
+    const group = await this.prisma.group.findFirst({
+      where: { id: groupId, deleted_at: null },
+      include: { members: true },
+    });
+
+    if (!group) {
+      throw new NotFoundException('Group not found');
+    }
+
+    const requesterMember = group.members.find((m) => m.user_id === currentUserId);
+    const currentUser = await this.prisma.biodata.findUnique({
+      where: { user_id: currentUserId },
+    });
+
+    const isGroupStaff =
+      requesterMember &&
+      (requesterMember.role === GroupRole.OWNER || requesterMember.role === GroupRole.ADMIN);
+    const isSystemAdmin = currentUser?.role === Role.ADMIN;
+
+    if (!isGroupStaff && !isSystemAdmin) {
+      throw new ForbiddenException('Only group owner or admin can view join requests');
+    }
+
+    return this.prisma.groupJoinRequest.findMany({
+      where: {
+        group_id: groupId,
+        status: JoinRequestStatus.PENDING,
+      },
+      include: {
+        user: {
+          select: { id: true, email: true, biodata: true },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+  }
+
+  async approveJoinRequest(currentUserId: number, groupId: number, requestId: number) {
+    const group = await this.prisma.group.findFirst({
+      where: { id: groupId, deleted_at: null },
+      include: { members: true },
+    });
+
+    if (!group) {
+      throw new NotFoundException('Group not found');
+    }
+
+    const requesterMember = group.members.find((m) => m.user_id === currentUserId);
+    const currentUser = await this.prisma.biodata.findUnique({
+      where: { user_id: currentUserId },
+    });
+
+    const isGroupStaff =
+      requesterMember &&
+      (requesterMember.role === GroupRole.OWNER || requesterMember.role === GroupRole.ADMIN);
+    const isSystemAdmin = currentUser?.role === Role.ADMIN;
+
+    if (!isGroupStaff && !isSystemAdmin) {
+      throw new ForbiddenException('Only group owner or admin can approve join requests');
+    }
+
+    const request = await this.prisma.groupJoinRequest.findFirst({
+      where: { id: requestId, group_id: groupId, status: JoinRequestStatus.PENDING },
+      include: {
+        user: { select: { id: true, email: true, biodata: true } },
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Pending join request not found');
+    }
+
+    // Update request status
+    await this.prisma.groupJoinRequest.update({
+      where: { id: requestId },
+      data: { status: JoinRequestStatus.APPROVED },
+    });
+
+    // Add user as group member if not already
+    const member = await this.prisma.groupMember.upsert({
+      where: {
+        group_id_user_id: { group_id: groupId, user_id: request.user_id },
+      },
+      update: { role: GroupRole.MEMBER },
+      create: {
+        group_id: groupId,
+        user_id: request.user_id,
         role: GroupRole.MEMBER,
       },
       include: {
@@ -171,25 +314,78 @@ export class ChatService {
       },
     });
 
-    const joiningUser = await this.prisma.user.findUnique({
-      where: { id: userId },
-      include: { biodata: true },
+    const joiningUserName = request.user?.biodata
+      ? `${request.user.biodata.first_name} ${request.user.biodata.last_name}`
+      : request.user?.email;
+
+    // Send notification to user: request approved
+    await this.notificationsService.createAndSend({
+      userId: request.user_id,
+      type: NotificationType.JOIN_REQUEST_APPROVED,
+      title: 'Permintaan Bergabung Disetujui',
+      message: `Permintaan Anda untuk bergabung ke grup "${group.name}" telah disetujui.`,
+      metadata: { groupId: group.id, groupName: group.name },
     });
 
-    const userName = joiningUser?.biodata
-      ? `${joiningUser.biodata.first_name} ${joiningUser.biodata.last_name}`
-      : joiningUser?.email;
-
-    // Fire notification to existing group members: "notif user masuk ke grup"
+    // Notify group members that user joined
     await this.notificationsService.createForGroupMembers(groupId, {
       type: NotificationType.USER_JOINED_GROUP,
       title: 'User Baru Bergabung',
-      message: `${userName} telah bergabung dengan grup "${group.name}".`,
-      excludeUserId: userId,
-      metadata: { groupId, joinedUserId: userId, userName },
+      message: `${joiningUserName} telah bergabung dengan grup "${group.name}".`,
+      excludeUserId: request.user_id,
+      metadata: { groupId, joinedUserId: request.user_id, userName: joiningUserName },
     });
 
-    return member;
+    return { message: 'Permintaan bergabung disetujui', member };
+  }
+
+  async rejectJoinRequest(currentUserId: number, groupId: number, requestId: number) {
+    const group = await this.prisma.group.findFirst({
+      where: { id: groupId, deleted_at: null },
+      include: { members: true },
+    });
+
+    if (!group) {
+      throw new NotFoundException('Group not found');
+    }
+
+    const requesterMember = group.members.find((m) => m.user_id === currentUserId);
+    const currentUser = await this.prisma.biodata.findUnique({
+      where: { user_id: currentUserId },
+    });
+
+    const isGroupStaff =
+      requesterMember &&
+      (requesterMember.role === GroupRole.OWNER || requesterMember.role === GroupRole.ADMIN);
+    const isSystemAdmin = currentUser?.role === Role.ADMIN;
+
+    if (!isGroupStaff && !isSystemAdmin) {
+      throw new ForbiddenException('Only group owner or admin can reject join requests');
+    }
+
+    const request = await this.prisma.groupJoinRequest.findFirst({
+      where: { id: requestId, group_id: groupId, status: JoinRequestStatus.PENDING },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Pending join request not found');
+    }
+
+    await this.prisma.groupJoinRequest.update({
+      where: { id: requestId },
+      data: { status: JoinRequestStatus.REJECTED },
+    });
+
+    // Send notification to user: request rejected
+    await this.notificationsService.createAndSend({
+      userId: request.user_id,
+      type: NotificationType.JOIN_REQUEST_REJECTED,
+      title: 'Permintaan Bergabung Ditolak',
+      message: `Permintaan Anda untuk bergabung ke grup "${group.name}" telah ditolak.`,
+      metadata: { groupId: group.id, groupName: group.name },
+    });
+
+    return { message: 'Permintaan bergabung ditolak' };
   }
 
   async removeMember(currentUserId: number, groupId: number, targetUserId: number) {

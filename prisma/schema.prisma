@@ -21,11 +21,20 @@ enum GroupRole {
   MEMBER
 }
 
+enum JoinRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum NotificationType {
   USER_REGISTERED
   ADDED_TO_GROUP
   REMOVED_FROM_GROUP
   USER_JOINED_GROUP
+  JOIN_REQUEST_RECEIVED
+  JOIN_REQUEST_APPROVED
+  JOIN_REQUEST_REJECTED
 }
 
 // ============================================
@@ -49,6 +58,7 @@ model User {
   sent_direct_messages  DirectMessage[]      @relation("SentDirectMessages")
   received_direct_msgs  DirectMessage[]      @relation("ReceivedDirectMessages")
   notifications         Notification[]
+  group_join_requests   GroupJoinRequest[]
 
   @@map("users")
 }
@@ -95,9 +105,10 @@ model Group {
   updated_at    DateTime  @updatedAt
   deleted_at    DateTime?
 
-  creator  User           @relation("GroupCreator", fields: [created_by_id], references: [id])
-  members  GroupMember[]
-  messages GroupMessage[]
+  creator       User               @relation("GroupCreator", fields: [created_by_id], references: [id])
+  members       GroupMember[]
+  messages      GroupMessage[]
+  join_requests GroupJoinRequest[]
 
   @@map("groups")
 }
@@ -114,6 +125,21 @@ model GroupMember {
 
   @@unique([group_id, user_id])
   @@map("group_members")
+}
+
+model GroupJoinRequest {
+  id         Int               @id @default(autoincrement())
+  group_id   Int
+  user_id    Int
+  status     JoinRequestStatus @default(PENDING)
+  created_at DateTime          @default(now())
+  updated_at DateTime          @updatedAt
+
+  group Group @relation(fields: [group_id], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([group_id, user_id])
+  @@map("group_join_requests")
 }
 
 model GroupMessage {

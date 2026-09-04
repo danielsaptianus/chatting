@@ -236,12 +236,26 @@ function setupSocketListeners() {
     if (notif.type === 'ADDED_TO_GROUP') icon = '🎉';
     if (notif.type === 'REMOVED_FROM_GROUP') icon = '⚠️';
     if (notif.type === 'USER_JOINED_GROUP') icon = '👥';
+    if (notif.type === 'JOIN_REQUEST_RECEIVED') icon = '📩';
+    if (notif.type === 'JOIN_REQUEST_APPROVED') icon = '✅';
+    if (notif.type === 'JOIN_REQUEST_REJECTED') icon = '❌';
 
     showToast(notif.title, notif.message, 'notification', icon);
 
     // Refresh groups/members if relevant
-    if (notif.type === 'ADDED_TO_GROUP' || notif.type === 'REMOVED_FROM_GROUP') {
+    if (
+      notif.type === 'ADDED_TO_GROUP' ||
+      notif.type === 'REMOVED_FROM_GROUP' ||
+      notif.type === 'JOIN_REQUEST_APPROVED'
+    ) {
       loadConversations();
+    }
+    if (
+      notif.type === 'JOIN_REQUEST_RECEIVED' &&
+      state.activeChat?.type === 'group' &&
+      state.activeChat.id === notif.metadata?.groupId
+    ) {
+      loadGroupJoinRequests(notif.metadata.groupId);
     }
   });
 
@@ -662,16 +676,112 @@ function renderGroupInfoDrawer(group) {
     `;
   }).join('');
 
+  const currentMember = (group.members || []).find((m) => m.user_id === state.currentUser?.id);
+  const isGroupStaff =
+    (currentMember && (currentMember.role === 'OWNER' || currentMember.role === 'ADMIN')) ||
+    state.currentUser?.biodata?.role === 'ADMIN';
+
+  let joinRequestsSectionHtml = '';
+  if (isGroupStaff) {
+    joinRequestsSectionHtml = `
+      <div style="margin-top:16px; margin-bottom:16px; border-top:1px solid var(--border-color); padding-top:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <h4 style="font-size:0.9rem; color:var(--text-primary);">Permintaan Bergabung:</h4>
+          <span id="group-requests-badge" class="badge-status" style="font-size:0.7rem; background:rgba(99,102,241,0.15); color:var(--primary); border:1px solid rgba(99,102,241,0.3);">Memeriksa...</span>
+        </div>
+        <div id="group-requests-list" style="display:flex; flex-direction:column; gap:6px;">
+          <p style="font-size:0.8rem; color:var(--text-muted);">Memeriksa permintaan...</p>
+        </div>
+      </div>
+    `;
+  }
+
   container.innerHTML = `
     <div style="margin-bottom:16px;">
       <h4 style="font-size:0.9rem; margin-bottom:4px;">Deskripsi:</h4>
       <p style="font-size:0.8rem; color:var(--text-secondary);">${escapeHtml(group.description || 'Tidak ada deskripsi.')}</p>
     </div>
+    ${joinRequestsSectionHtml}
     <h4 style="font-size:0.9rem; margin-bottom:8px;">Daftar Anggota (${group.members?.length || 0}):</h4>
     <div style="display:flex; flex-direction:column; gap:6px;">
       ${memberListHtml}
     </div>
   `;
+
+  if (isGroupStaff) {
+    loadGroupJoinRequests(group.id);
+  }
+}
+
+async function loadGroupJoinRequests(groupId) {
+  const listEl = document.getElementById('group-requests-list');
+  const badgeEl = document.getElementById('group-requests-badge');
+  if (!listEl) return;
+
+  try {
+    const requests = await api.getGroupJoinRequests(groupId);
+    if (!requests || requests.length === 0) {
+      if (badgeEl) {
+        badgeEl.textContent = '0 Menunggu';
+        badgeEl.style.background = 'rgba(255,255,255,0.05)';
+        badgeEl.style.color = 'var(--text-muted)';
+      }
+      listEl.innerHTML = '<p style="font-size:0.8rem; color:var(--text-muted); padding:4px 0;">Tidak ada permintaan tertunda.</p>';
+      return;
+    }
+
+    if (badgeEl) {
+      badgeEl.textContent = `${requests.length} Menunggu`;
+      badgeEl.style.background = 'rgba(234, 179, 8, 0.15)';
+      badgeEl.style.color = '#eab308';
+      badgeEl.style.border = '1px solid rgba(234, 179, 8, 0.3)';
+    }
+
+    listEl.innerHTML = requests.map((r) => {
+      const name = r.user?.biodata ? `${r.user.biodata.first_name} ${r.user.biodata.last_name}` : r.user?.email;
+      return `
+        <div class="notification-item" style="justify-content:space-between; align-items:center; background:rgba(255,255,255,0.03); border:1px solid var(--border-color); border-radius:8px; padding:8px 10px;">
+          <div>
+            <div class="notification-title" style="font-size:0.85rem; font-weight:600;">${escapeHtml(name)}</div>
+            <div class="notification-message" style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(r.user?.email || '')}</div>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="btn btn-primary btn-sm" style="padding:3px 8px; font-size:0.75rem;" onclick="handleApproveJoinRequest(${groupId}, ${r.id})">Terima</button>
+            <button class="btn btn-danger btn-sm" style="padding:3px 8px; font-size:0.75rem;" onclick="handleRejectJoinRequest(${groupId}, ${r.id})">Tolak</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    listEl.innerHTML = `<p style="font-size:0.8rem; color:var(--danger);">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function handleApproveJoinRequest(groupId, requestId) {
+  try {
+    await api.approveGroupJoinRequest(groupId, requestId);
+    showToast('Permintaan Disetujui', 'Pengguna telah bergabung ke grup!', 'success', '🎉');
+    await loadConversations();
+    const updatedGroup = state.groups.find((g) => g.id === groupId);
+    if (updatedGroup) {
+      state.activeChat.data = updatedGroup;
+      renderGroupInfoDrawer(updatedGroup);
+    } else {
+      loadGroupJoinRequests(groupId);
+    }
+  } catch (err) {
+    showToast('Gagal Menyetujui', err.message, 'error', '❌');
+  }
+}
+
+async function handleRejectJoinRequest(groupId, requestId) {
+  try {
+    await api.rejectGroupJoinRequest(groupId, requestId);
+    showToast('Permintaan Ditolak', 'Permintaan bergabung telah ditolak.', 'info', 'ℹ️');
+    loadGroupJoinRequests(groupId);
+  } catch (err) {
+    showToast('Gagal Menolak', err.message, 'error', '❌');
+  }
 }
 
 function renderUserInfoDrawer(user) {
@@ -780,8 +890,18 @@ async function openExploreGroupsModal() {
 
     body.innerHTML = allGroups.map((g) => {
       const isMember = (g.members || []).some((m) => m.user_id === state.currentUser?.id);
+      const hasPending = (g.join_requests || []).some((r) => r.user_id === state.currentUser?.id);
       const initial = (g.name || 'G').charAt(0).toUpperCase();
       const memberCount = g.members?.length || 0;
+
+      let actionHtml = '';
+      if (isMember) {
+        actionHtml = '<span class="badge-status badge-active" style="padding:4px 8px;">Sudah Bergabung</span>';
+      } else if (hasPending) {
+        actionHtml = '<span class="badge-status" style="padding:4px 8px; background:rgba(234,179,8,0.15); color:#eab308; border:1px solid rgba(234,179,8,0.3);">⏳ Menunggu Persetujuan</span>';
+      } else {
+        actionHtml = `<button class="btn btn-primary btn-sm" onclick="handleJoinGroup(${g.id})">Minta Bergabung</button>`;
+      }
 
       return `
         <div class="notification-item" style="justify-content:space-between; align-items:center; margin-bottom:8px;">
@@ -793,11 +913,7 @@ async function openExploreGroupsModal() {
             </div>
           </div>
           <div>
-            ${
-              isMember
-                ? '<span class="badge-status badge-active" style="padding:4px 8px;">Sudah Bergabung</span>'
-                : `<button class="btn btn-primary btn-sm" onclick="handleJoinGroup(${g.id})">Gabung</button>`
-            }
+            ${actionHtml}
           </div>
         </div>
       `;
@@ -809,13 +925,11 @@ async function openExploreGroupsModal() {
 
 async function handleJoinGroup(groupId) {
   try {
-    await api.joinGroup(groupId);
-    closeModal('modal-explore-groups');
-    showToast('Bergabung ke Grup', 'Anda berhasil bergabung ke grup!', 'success', '🎉');
-    await loadConversations();
-    selectGroupChat(groupId);
+    const res = await api.requestJoinGroup(groupId);
+    showToast('Permintaan Terkirim', res.message || 'Permintaan bergabung telah dikirim ke Admin/Owner grup!', 'success', '⏳');
+    renderExploreGroupsModal();
   } catch (err) {
-    showToast('Gagal Bergabung', err.message, 'error', '❌');
+    showToast('Gagal Mengajukan', err.message, 'error', '❌');
   }
 }
 

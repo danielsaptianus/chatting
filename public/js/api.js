@@ -174,6 +174,28 @@ const api = {
     });
   },
 
+  async requestJoinGroup(groupId) {
+    return this.request(`/chat/groups/${groupId}/join-request`, {
+      method: 'POST',
+    });
+  },
+
+  async getGroupJoinRequests(groupId) {
+    return this.request(`/chat/groups/${groupId}/join-requests`);
+  },
+
+  async approveGroupJoinRequest(groupId, requestId) {
+    return this.request(`/chat/groups/${groupId}/join-requests/${requestId}/approve`, {
+      method: 'POST',
+    });
+  },
+
+  async rejectGroupJoinRequest(groupId, requestId) {
+    return this.request(`/chat/groups/${groupId}/join-requests/${requestId}/reject`, {
+      method: 'POST',
+    });
+  },
+
   async removeGroupMember(groupId, userId) {
     return this.request(`/chat/groups/${groupId}/members/${userId}`, {
       method: 'DELETE',

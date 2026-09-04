@@ -60,12 +60,50 @@ export class ChatController {
   }
 
   @Post('groups/:id/join')
-  @ApiOperation({ summary: 'Join a group' })
+  @ApiOperation({ summary: 'Request to join a group' })
   async joinGroup(
     @GetUser('userId') userId: number,
     @Param('id', ParseIntPipe) groupId: number,
   ) {
     return this.chatService.joinGroup(userId, groupId);
+  }
+
+  @Post('groups/:id/join-request')
+  @ApiOperation({ summary: 'Submit a request to join a group' })
+  async requestJoinGroup(
+    @GetUser('userId') userId: number,
+    @Param('id', ParseIntPipe) groupId: number,
+  ) {
+    return this.chatService.requestJoinGroup(userId, groupId);
+  }
+
+  @Get('groups/:id/join-requests')
+  @ApiOperation({ summary: 'Get pending join requests for a group (Owner/Admin)' })
+  async getJoinRequests(
+    @GetUser('userId') currentUserId: number,
+    @Param('id', ParseIntPipe) groupId: number,
+  ) {
+    return this.chatService.getJoinRequests(currentUserId, groupId);
+  }
+
+  @Post('groups/:id/join-requests/:requestId/approve')
+  @ApiOperation({ summary: 'Approve a join request (Owner/Admin)' })
+  async approveJoinRequest(
+    @GetUser('userId') currentUserId: number,
+    @Param('id', ParseIntPipe) groupId: number,
+    @Param('requestId', ParseIntPipe) requestId: number,
+  ) {
+    return this.chatService.approveJoinRequest(currentUserId, groupId, requestId);
+  }
+
+  @Post('groups/:id/join-requests/:requestId/reject')
+  @ApiOperation({ summary: 'Reject a join request (Owner/Admin)' })
+  async rejectJoinRequest(
+    @GetUser('userId') currentUserId: number,
+    @Param('id', ParseIntPipe) groupId: number,
+    @Param('requestId', ParseIntPipe) requestId: number,
+  ) {
+    return this.chatService.rejectJoinRequest(currentUserId, groupId, requestId);
   }
 
   @Delete('groups/:id/members/:userId')
