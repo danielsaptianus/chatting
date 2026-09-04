@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChatSphere - Real-time Chat & Notifications</title>
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="css/style.css">
+  <!-- Socket.io Client -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- ============================================================== -->
+  <!-- AUTHENTICATION SCREEN -->
+  <!-- ============================================================== -->
+  <div id="auth-screen" class="auth-screen">
+    <div class="auth-card glass-panel">
+      <div class="auth-header">
+        <div class="app-logo">
+          <div class="logo-icon">💬</div>
+          <h1>ChatSphere</h1>
+        </div>
+        <p id="auth-subtitle" class="subtitle">Masuk untuk memulai percakapan real-time</p>
+      </div>
+
+      <!-- Alert Message -->
+      <div id="auth-alert" class="alert-box hidden"></div>
+
+      <!-- Form Login -->
+      <form id="form-login" class="auth-form">
+        <div class="form-group">
+          <label for="login-email">Email</label>
+          <div class="input-wrapper">
+            <input type="email" id="login-email" required placeholder="nama@email.com" autocomplete="email">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="login-password">Password</label>
+          <div class="input-wrapper">
+            <input type="password" id="login-password" required placeholder="••••••••" autocomplete="current-password">
+          </div>
+        </div>
+        <div class="form-actions-inline">
+          <button type="button" id="btn-to-reset" class="btn-link">Lupa password?</button>
+        </div>
+        <button type="submit" id="btn-login-submit" class="btn btn-primary btn-block">
+          <span>Masuk</span>
+          <span class="spinner hidden" id="login-spinner"></span>
+        </button>
+
+        <div class="seed-hints">
+          <small>🔑 <strong>Akun Demo:</strong></small>
+          <div class="seed-chips">
+            <button type="button" class="chip" onclick="fillLogin('admin@chatting.com', 'password123')">Admin Demo</button>
+            <button type="button" class="chip" onclick="fillLogin('user@chatting.com', 'password123')">User Demo</button>
+          </div>
+        </div>
+      </form>
+
+      <!-- Form Request Reset Password -->
+      <form id="form-request-reset" class="auth-form hidden">
+        <div class="form-group">
+          <label for="reset-email">Email Terdaftar</label>
+          <div class="input-wrapper">
+            <input type="email" id="reset-email" required placeholder="nama@email.com">
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Minta Token Reset</button>
+        <button type="button" id="btn-back-to-login" class="btn btn-secondary btn-block">Kembali ke Login</button>
+      </form>
+
+      <!-- Form Confirm Reset Password -->
+      <form id="form-confirm-reset" class="auth-form hidden">
+        <div class="form-group">
+          <label for="reset-token">Token Reset</label>
+          <input type="text" id="reset-token" required placeholder="Paste token reset">
+        </div>
+        <div class="form-group">
+          <label for="new-password">Password Baru</label>
+          <input type="password" id="new-password" required placeholder="Minimal 6 karakter" minlength="6">
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Ubah Password</button>
+        <button type="button" id="btn-back-to-login-2" class="btn btn-secondary btn-block">Kembali ke Login</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- MAIN APPLICATION SCREEN -->
+  <!-- ============================================================== -->
+  <div id="app-screen" class="app-screen hidden">
+    <!-- Top Navbar -->
+    <header class="app-header glass-panel">
+      <div class="header-left">
+        <button id="btn-toggle-sidebar" class="btn-icon mobile-only" title="Toggle Sidebar">☰</button>
+        <div class="brand">
+          <span class="logo-icon-sm">💬</span>
+          <span class="brand-name">ChatSphere</span>
+        </div>
+        <div class="ws-status" id="ws-badge" title="WebSocket Status">
+          <span class="status-dot"></span>
+          <span class="status-text">Connecting</span>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <!-- Admin Management Button (Admin only) -->
+        <button id="btn-open-admin" class="btn btn-outline btn-sm hidden">
+          <span>👥 Kelola User</span>
+        </button>
+
+        <!-- Notification Bell -->
+        <div class="notification-wrapper">
+          <button id="btn-notification-bell" class="btn-icon btn-notification" title="Notifikasi">
+            🔔
+            <span id="notification-count" class="badge-count hidden">0</span>
+          </button>
+
+          <!-- Notification Dropdown Menu -->
+          <div id="notification-dropdown" class="notification-dropdown glass-panel hidden">
+            <div class="notification-dropdown-header">
+              <h3>Notifikasi</h3>
+              <button id="btn-mark-all-read" class="btn-link-sm">Tandai Dibaca</button>
+            </div>
+            <div id="notification-list" class="notification-list">
+              <div class="empty-state">Belum ada notifikasi</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- User Profile Dropdown -->
+        <div class="user-profile-pill">
+          <div class="user-avatar" id="current-user-avatar">U</div>
+          <div class="user-info-text">
+            <span class="user-fullname" id="current-user-name">User</span>
+            <span class="user-role-badge" id="current-user-role">USER</span>
+          </div>
+          <button id="btn-logout" class="btn-icon btn-logout" title="Keluar">⎋</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <div class="app-body">
+      <!-- Sidebar (Conversations List) -->
+      <aside class="sidebar glass-panel" id="app-sidebar">
+        <!-- Tab switcher: Group vs PC -->
+        <div class="sidebar-tabs">
+          <button class="tab-btn active" id="tab-groups" data-tab="groups">
+            <span>Grup</span>
+          </button>
+          <button class="tab-btn" id="tab-pc" data-tab="pc">
+            <span>Pesan Pribadi (PC)</span>
+          </button>
+        </div>
+
+        <!-- Sidebar Header Actions -->
+        <div class="sidebar-actions">
+          <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="input-search-chat" placeholder="Cari percakapan...">
+          </div>
+          <button id="btn-new-chat" class="btn btn-primary btn-sm" title="Buat Grup Baru">
+            <span id="btn-new-chat-label">+ Grup</span>
+          </button>
+        </div>
+
+        <!-- List of Conversations -->
+        <div class="conversation-list" id="conversation-list">
+          <div class="loading-spinner-wrapper">
+            <span class="spinner"></span>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Chat Main Window -->
+      <main class="chat-main" id="chat-main">
+        <!-- Placeholder when no chat is selected -->
+        <div id="chat-empty-state" class="chat-empty-state">
+          <div class="empty-illustration">💬</div>
+          <h2>Mulai Mengobrol</h2>
+          <p>Pilih grup atau kontak percakapan personal dari menu sebelah kiri untuk membaca pesan dan berinteraksi secara langsung.</p>
+        </div>
+
+        <!-- Active Chat Window -->
+        <div id="chat-active-window" class="chat-active-window hidden">
+          <!-- Chat Header -->
+          <div class="chat-header glass-panel">
+            <div class="chat-header-info">
+              <div class="chat-avatar" id="active-chat-avatar">G</div>
+              <div>
+                <h3 id="active-chat-title">Nama Percakapan</h3>
+                <p id="active-chat-subtitle" class="chat-subtitle">0 Anggota</p>
+              </div>
+            </div>
+            <div class="chat-header-actions" id="chat-header-actions">
+              <!-- Dynamically populated buttons (Tambah Member, Info, etc.) -->
+            </div>
+          </div>
+
+          <!-- Messages Stream Container -->
+          <div class="chat-messages" id="chat-messages">
+            <!-- Messages rendered here -->
+          </div>
+
+          <!-- Chat Input Footer -->
+          <div class="chat-footer glass-panel">
+            <form id="form-send-message" class="message-form">
+              <input 
+                type="text" 
+                id="input-message" 
+                placeholder="Ketik pesan Anda di sini... (Tekan Enter untuk kirim)" 
+                autocomplete="off"
+                required
+              >
+              <button type="submit" class="btn btn-primary btn-send" id="btn-send">
+                <span>Kirim 🚀</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      </main>
+
+      <!-- Right Info Drawer (Optional/Collapsible) -->
+      <aside class="info-drawer glass-panel hidden" id="info-drawer">
+        <div class="info-drawer-header">
+          <h3 id="info-drawer-title">Detail Percakapan</h3>
+          <button id="btn-close-info" class="btn-icon">✕</button>
+        </div>
+        <div class="info-drawer-content" id="info-drawer-content">
+          <!-- Populated dynamically -->
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- MODALS -->
+  <!-- ============================================================== -->
+
+  <!-- Modal: Buat Grup Baru -->
+  <div id="modal-create-group" class="modal-overlay hidden">
+    <div class="modal-dialog glass-panel">
+      <div class="modal-header">
+        <h3>Buat Grup Baru</h3>
+        <button class="btn-icon modal-close" onclick="closeModal('modal-create-group')">✕</button>
+      </div>
+      <form id="form-create-group">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="group-name">Nama Grup</label>
+            <input type="text" id="group-name" required placeholder="Contoh: Tim Backend">
+          </div>
+          <div class="form-group">
+            <label for="group-desc">Deskripsi (Opsional)</label>
+            <textarea id="group-desc" rows="3" placeholder="Deskripsi aktivitas grup"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-create-group')">Batal</button>
+          <button type="submit" class="btn btn-primary">Buat Grup</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Tambah Member ke Grup -->
+  <div id="modal-add-member" class="modal-overlay hidden">
+    <div class="modal-dialog glass-panel">
+      <div class="modal-header">
+        <h3>Tambah Anggota ke Grup</h3>
+        <button class="btn-icon modal-close" onclick="closeModal('modal-add-member')">✕</button>
+      </div>
+      <form id="form-add-member">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="select-user-to-add">Pilih Pengguna</label>
+            <select id="select-user-to-add" required>
+              <option value="">-- Pilih User --</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-add-member')">Batal</button>
+          <button type="submit" class="btn btn-primary">Tambahkan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Kelola User (Khusus Admin) -->
+  <div id="modal-admin-users" class="modal-overlay hidden">
+    <div class="modal-dialog modal-lg glass-panel">
+      <div class="modal-header">
+        <div>
+          <h3>👥 Manajemen Pengguna (Admin)</h3>
+          <p class="subtitle-sm">Kelola pengguna terdaftar, registrasi, dan soft delete.</p>
+        </div>
+        <button class="btn-icon modal-close" onclick="closeModal('modal-admin-users')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="admin-toolbar">
+          <button id="btn-admin-register-user" class="btn btn-primary btn-sm">+ Daftarkan User Baru</button>
+          <label class="checkbox-label">
+            <input type="checkbox" id="check-include-deleted">
+            <span>Tampilkan user yang terhapus (Soft deleted)</span>
+          </label>
+        </div>
+        <div class="table-responsive">
+          <table class="data-table" id="table-users">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Nama Lengkap</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="table-users-body">
+              <!-- Populated dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-admin-users')">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Register User Baru oleh Admin -->
+  <div id="modal-register-user" class="modal-overlay hidden">
+    <div class="modal-dialog glass-panel">
+      <div class="modal-header">
+        <h3>Daftarkan User Baru</h3>
+        <button class="btn-icon modal-close" onclick="closeModal('modal-register-user')">✕</button>
+      </div>
+      <form id="form-register-user">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="reg-firstname">Nama Depan</label>
+              <input type="text" id="reg-firstname" required placeholder="Budi">
+            </div>
+            <div class="form-group">
+              <label for="reg-lastname">Nama Belakang</label>
+              <input type="text" id="reg-lastname" required placeholder="Santoso">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="reg-email">Email</label>
+            <input type="email" id="reg-email" required placeholder="user@domain.com">
+          </div>
+          <div class="form-group">
+            <label for="reg-password">Password</label>
+            <input type="password" id="reg-password" required placeholder="Minimal 6 karakter" minlength="6">
+          </div>
+          <div class="form-group">
+            <label for="reg-role">Role</label>
+            <select id="reg-role">
+              <option value="USER">USER</option>
+              <option value="ADMIN">ADMIN</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-register-user')">Batal</button>
+          <button type="submit" class="btn btn-primary">Daftarkan User</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Edit User -->
+  <div id="modal-edit-user" class="modal-overlay hidden">
+    <div class="modal-dialog glass-panel">
+      <div class="modal-header">
+        <h3>Edit Pengguna</h3>
+        <button class="btn-icon modal-close" onclick="closeModal('modal-edit-user')">✕</button>
+      </div>
+      <form id="form-edit-user">
+        <input type="hidden" id="edit-user-id">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit-firstname">Nama Depan</label>
+              <input type="text" id="edit-firstname" required>
+            </div>
+            <div class="form-group">
+              <label for="edit-lastname">Nama Belakang</label>
+              <input type="text" id="edit-lastname" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="edit-role">Role</label>
+            <select id="edit-role">
+              <option value="USER">USER</option>
+              <option value="ADMIN">ADMIN</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="edit-active">
+              <span>Akun Aktif</span>
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-user')">Batal</button>
+          <button type="submit" class="btn btn-primary">Simpan Perubahan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/api.js"></script>
+  <script src="js/socket.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

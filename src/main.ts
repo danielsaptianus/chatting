@@ -3,10 +3,15 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { NestFactory, Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import cookieParser = require('cookie-parser');
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { join } from 'path';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Serve static assets from public directory
+  app.useStaticAssets(join(__dirname, '..', 'public'));
 
   const configService = app.get(ConfigService);
 
