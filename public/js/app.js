@@ -658,44 +658,80 @@ async function handleSendMessage(e) {
 // ==========================================================================
 // Info Drawer & Member Management
 // ==========================================================================
-function toggleInfoDrawer() {
+function toggleInfoDrawer(forceOpen = null) {
   const drawer = document.getElementById('info-drawer');
-  drawer.classList.toggle('hidden');
+  if (!drawer) return;
+  if (forceOpen === true) {
+    drawer.classList.remove('hidden');
+  } else if (forceOpen === false) {
+    drawer.classList.add('hidden');
+  } else {
+    drawer.classList.toggle('hidden');
+  }
 }
 
 function renderGroupInfoDrawer(group) {
   const container = document.getElementById('info-drawer-content');
+  if (!container) return;
   document.getElementById('info-drawer-title').textContent = 'Detail Grup';
 
+  const currentMember = (group.members || []).find((m) => m.user_id === state.currentUser?.id);
+  const myRole = currentMember?.role;
+  const isSystemAdmin = state.currentUser?.biodata?.role === 'ADMIN';
+  const isGroupStaff = isSystemAdmin || myRole === 'OWNER' || myRole === 'ADMIN';
+
+  // Creator information
+  const creatorMember = (group.members || []).find((m) => m.user_id === group.created_by_id);
+  let creatorName = 'Pembuat Grup';
+  if (creatorMember) {
+    creatorName = creatorMember.user?.biodata
+      ? `${creatorMember.user.biodata.first_name} ${creatorMember.user.biodata.last_name}`
+      : creatorMember.user?.email || 'Pembuat Grup';
+  } else if (group.created_by) {
+    creatorName = group.created_by.biodata
+      ? `${group.created_by.biodata.first_name} ${group.created_by.biodata.last_name}`
+      : group.created_by.email || 'Pembuat Grup';
+  }
+
   const memberListHtml = (group.members || []).map((m) => {
-    const name = m.user?.biodata ? `${m.user.biodata.first_name} ${m.user.biodata.last_name}` : m.user?.email;
-    const isOwnerOrAdmin = m.role === 'OWNER' || m.role === 'ADMIN';
-    const canRemove =
-      (state.currentUser?.biodata?.role === 'ADMIN' || group.created_by_id === state.currentUser?.id) &&
-      m.user_id !== state.currentUser?.id;
+    const name = m.user?.biodata ? `${m.user.biodata.first_name} ${m.user.biodata.last_name}` : (m.user?.email || 'Pengguna');
+    const isMe = m.user_id === state.currentUser?.id;
+    const canRemove = !isMe && (isSystemAdmin || myRole === 'OWNER' || (myRole === 'ADMIN' && m.role === 'MEMBER'));
+
+    let roleBadge = '<span class="badge-role-member">Anggota</span>';
+    if (m.role === 'OWNER') {
+      roleBadge = '<span class="badge-role-owner">👑 Owner</span>';
+    } else if (m.role === 'ADMIN') {
+      roleBadge = '<span class="badge-role-admin">⭐ Admin</span>';
+    }
 
     return `
-      <div class="notification-item" style="justify-content:space-between; align-items:center;">
-        <div>
-          <div class="notification-title">${escapeHtml(name)}</div>
-          <div class="notification-time">${m.role}</div>
+      <div class="drawer-member-item">
+        <div class="drawer-member-info">
+          <div class="drawer-member-avatar">
+            ${name.charAt(0).toUpperCase()}
+          </div>
+          <div class="drawer-member-names">
+            <div class="drawer-member-name">
+              ${escapeHtml(name)} ${isMe ? '<span style="font-size:0.7rem; color:var(--primary); font-weight:normal;">(Anda)</span>' : ''}
+            </div>
+            <div class="drawer-member-email">${escapeHtml(m.user?.email || '')}</div>
+          </div>
         </div>
-        ${canRemove ? `<button class="btn btn-danger btn-sm" onclick="handleRemoveMember(${group.id}, ${m.user_id})">Keluarkan</button>` : ''}
+        <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+          ${roleBadge}
+          ${canRemove ? `<button class="btn btn-danger btn-sm" style="padding:3px 8px; font-size:0.75rem;" onclick="handleRemoveMember(${group.id}, ${m.user_id})" title="Keluarkan anggota">Keluarkan</button>` : ''}
+        </div>
       </div>
     `;
   }).join('');
 
-  const currentMember = (group.members || []).find((m) => m.user_id === state.currentUser?.id);
-  const isGroupStaff =
-    (currentMember && (currentMember.role === 'OWNER' || currentMember.role === 'ADMIN')) ||
-    state.currentUser?.biodata?.role === 'ADMIN';
-
   let joinRequestsSectionHtml = '';
   if (isGroupStaff) {
     joinRequestsSectionHtml = `
-      <div style="margin-top:16px; margin-bottom:16px; border-top:1px solid var(--border-color); padding-top:12px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <h4 style="font-size:0.9rem; color:var(--text-primary);">Permintaan Bergabung:</h4>
+      <div class="drawer-section">
+        <div class="drawer-section-title">
+          <span>Permintaan Bergabung</span>
           <span id="group-requests-badge" class="badge-status" style="font-size:0.7rem; background:rgba(99,102,241,0.15); color:var(--primary); border:1px solid rgba(99,102,241,0.3);">Memeriksa...</span>
         </div>
         <div id="group-requests-list" style="display:flex; flex-direction:column; gap:6px;">
@@ -705,23 +741,46 @@ function renderGroupInfoDrawer(group) {
     `;
   }
 
-  container.innerHTML = `
-    <div style="margin-bottom:16px;">
-      <h4 style="font-size:0.9rem; margin-bottom:4px;">Deskripsi:</h4>
-      <p style="font-size:0.8rem; color:var(--text-secondary);">${escapeHtml(group.description || 'Tidak ada deskripsi.')}</p>
-    </div>
-    ${isStaff ? `
-      <div style="margin-bottom:16px;">
-        <button class="btn btn-outline btn-sm" style="width:100%; justify-content:center;" onclick="openGroupInviteModal(${group.id})">🔗 Bagikan Tautan Undangan</button>
+  let staffActionsHtml = '';
+  if (isGroupStaff) {
+    staffActionsHtml = `
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <button class="btn btn-outline btn-sm" style="justify-content:center; padding:8px;" onclick="openAddMemberModal(${group.id})">➕ Tambah</button>
+        <button class="btn btn-outline btn-sm" style="justify-content:center; padding:8px;" onclick="openGroupInviteModal(${group.id})">🔗 Tautan</button>
       </div>
-    ` : ''}
-    ${joinRequestsSectionHtml}
-    <h4 style="font-size:0.9rem; margin-bottom:8px;">Daftar Anggota (${group.members?.length || 0}):</h4>
-    <div style="display:flex; flex-direction:column; gap:6px;">
-      ${memberListHtml}
+    `;
+  }
+
+  container.innerHTML = `
+    <div class="drawer-hero">
+      <div class="drawer-avatar">${(group.name || 'G').charAt(0).toUpperCase()}</div>
+      <div class="drawer-title">${escapeHtml(group.name)}</div>
+      <div class="drawer-subtitle">Dibuat oleh ${escapeHtml(creatorName)} • ${group.members?.length || 0} Anggota</div>
     </div>
-    <div style="margin-top:20px; border-top:1px solid var(--border-color); padding-top:14px;">
-      <button class="btn btn-outline btn-sm" style="color:var(--danger); border-color:var(--danger); width:100%; justify-content:center;" onclick="handleLeaveGroup(${group.id})">🚪 Keluar dari Grup</button>
+
+    ${staffActionsHtml}
+
+    <div class="drawer-section">
+      <div class="drawer-section-title">Deskripsi</div>
+      <div class="drawer-desc-box">
+        ${escapeHtml(group.description || 'Tidak ada deskripsi untuk grup ini.')}
+      </div>
+    </div>
+
+    ${joinRequestsSectionHtml}
+
+    <div class="drawer-section">
+      <div class="drawer-section-title">
+        <span>Daftar Anggota</span>
+        <span style="font-size:0.75rem; color:var(--text-muted); font-weight:normal;">${group.members?.length || 0} orang</span>
+      </div>
+      <div class="drawer-member-list">
+        ${memberListHtml}
+      </div>
+    </div>
+
+    <div style="margin-top:8px; padding-top:14px; border-top:1px solid var(--border-glass);">
+      <button class="btn btn-outline btn-sm" style="color:var(--danger); border-color:rgba(239, 68, 68, 0.4); width:100%; justify-content:center; padding:9px;" onclick="handleLeaveGroup(${group.id})">🚪 Keluar dari Grup</button>
     </div>
   `;
 
@@ -742,6 +801,7 @@ async function loadGroupJoinRequests(groupId) {
         badgeEl.textContent = '0 Menunggu';
         badgeEl.style.background = 'rgba(255,255,255,0.05)';
         badgeEl.style.color = 'var(--text-muted)';
+        badgeEl.style.border = '1px solid var(--border-glass)';
       }
       listEl.innerHTML = '<p style="font-size:0.8rem; color:var(--text-muted); padding:4px 0;">Tidak ada permintaan tertunda.</p>';
       return;
@@ -755,16 +815,16 @@ async function loadGroupJoinRequests(groupId) {
     }
 
     listEl.innerHTML = requests.map((r) => {
-      const name = r.user?.biodata ? `${r.user.biodata.first_name} ${r.user.biodata.last_name}` : r.user?.email;
+      const name = r.user?.biodata ? `${r.user.biodata.first_name} ${r.user.biodata.last_name}` : (r.user?.email || 'Pengguna');
       return `
-        <div class="notification-item" style="justify-content:space-between; align-items:center; background:rgba(255,255,255,0.03); border:1px solid var(--border-color); border-radius:8px; padding:8px 10px;">
-          <div>
-            <div class="notification-title" style="font-size:0.85rem; font-weight:600;">${escapeHtml(name)}</div>
-            <div class="notification-message" style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(r.user?.email || '')}</div>
+        <div class="drawer-request-item">
+          <div style="min-width:0; flex:1;">
+            <div style="font-size:0.85rem; font-weight:600; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(name)}</div>
+            <div style="font-size:0.72rem; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(r.user?.email || '')}</div>
           </div>
-          <div style="display:flex; gap:6px;">
-            <button class="btn btn-primary btn-sm" style="padding:3px 8px; font-size:0.75rem;" onclick="handleApproveJoinRequest(${groupId}, ${r.id})">Terima</button>
-            <button class="btn btn-danger btn-sm" style="padding:3px 8px; font-size:0.75rem;" onclick="handleRejectJoinRequest(${groupId}, ${r.id})">Tolak</button>
+          <div style="display:flex; gap:6px; flex-shrink:0;">
+            <button class="btn btn-primary btn-sm" style="padding:4px 8px; font-size:0.75rem;" onclick="handleApproveJoinRequest(${groupId}, ${r.id})">Terima</button>
+            <button class="btn btn-danger btn-sm" style="padding:4px 8px; font-size:0.75rem;" onclick="handleRejectJoinRequest(${groupId}, ${r.id})">Tolak</button>
           </div>
         </div>
       `;
@@ -801,20 +861,45 @@ async function handleRejectJoinRequest(groupId, requestId) {
   }
 }
 
+async function handleLeaveGroup(groupId) {
+  if (!confirm('Apakah Anda yakin ingin keluar dari grup ini?')) return;
+  try {
+    await api.leaveGroup(groupId, state.currentUser.id);
+    showToast('Keluar Grup', 'Anda telah keluar dari grup.', 'info', '👋');
+    toggleInfoDrawer(false);
+    if (state.activeChat?.type === 'group' && state.activeChat?.id === groupId) {
+      state.activeChat = null;
+      document.getElementById('chat-active-window')?.classList.add('hidden');
+      document.getElementById('chat-empty-state')?.classList.remove('hidden');
+    }
+    await loadConversations();
+  } catch (err) {
+    showToast('Gagal Keluar Grup', err.message, 'error', '❌');
+  }
+}
+
 function renderUserInfoDrawer(user) {
   const container = document.getElementById('info-drawer-content');
+  if (!container) return;
   document.getElementById('info-drawer-title').textContent = 'Profil Pengguna';
 
   const name = user.biodata ? `${user.biodata.first_name} ${user.biodata.last_name}` : user.email;
 
   container.innerHTML = `
-    <div style="text-align:center; padding:16px 0;">
-      <div class="chat-avatar user" style="width:64px; height:64px; margin:0 auto 12px; font-size:1.5rem;">
+    <div class="drawer-hero">
+      <div class="drawer-avatar" style="background: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);">
         ${name.charAt(0).toUpperCase()}
       </div>
-      <h3>${escapeHtml(name)}</h3>
-      <p style="font-size:0.85rem; color:var(--text-muted);">${escapeHtml(user.email)}</p>
-      <span class="user-role-badge" style="margin-top:6px; display:inline-block;">ROLE: ${user.biodata?.role || 'USER'}</span>
+      <div class="drawer-title">${escapeHtml(name)}</div>
+      <div class="drawer-subtitle">${escapeHtml(user.email)}</div>
+      <span class="badge-role-admin" style="margin-top:8px; display:inline-block;">ROLE: ${user.biodata?.role || 'USER'}</span>
+    </div>
+    <div class="drawer-section" style="margin-top:16px;">
+      <div class="drawer-section-title">Informasi Kontak</div>
+      <div class="drawer-desc-box">
+        <p><strong>Email:</strong> ${escapeHtml(user.email)}</p>
+        <p style="margin-top:6px;"><strong>Nama:</strong> ${escapeHtml(name)}</p>
+      </div>
     </div>
   `;
 }
