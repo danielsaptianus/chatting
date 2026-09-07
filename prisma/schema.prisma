@@ -21,6 +21,24 @@ enum GroupRole {
   MEMBER
 }
 
+enum CommunityRole {
+  COMMUNITY_OWNER
+  COMMUNITY_ADMIN
+  COMMUNITY_MEMBER
+}
+
+enum CallType {
+  DIRECT
+  GROUP
+}
+
+enum CallStatus {
+  MISSED
+  REJECTED
+  COMPLETED
+  BUSY
+}
+
 enum JoinRequestStatus {
   PENDING
   APPROVED
@@ -35,6 +53,11 @@ enum NotificationType {
   JOIN_REQUEST_RECEIVED
   JOIN_REQUEST_APPROVED
   JOIN_REQUEST_REJECTED
+  COMMUNITY_CREATED
+  COMMUNITY_MEMBER_ADDED
+  COMMUNITY_MEMBER_REMOVED
+  CALL_INCOMING
+  CALL_MISSED
 }
 
 // ============================================
@@ -59,6 +82,12 @@ model User {
   received_direct_msgs  DirectMessage[]      @relation("ReceivedDirectMessages")
   notifications         Notification[]
   group_join_requests   GroupJoinRequest[]
+
+  // Community & Calls Relations
+  created_communities   Community[]          @relation("CommunityCreator")
+  community_memberships CommunityMember[]
+  initiated_calls       CallSession[]        @relation("InitiatedCalls")
+  received_calls        CallSession[]        @relation("ReceivedCalls")
 
   @@map("users")
 }
@@ -97,19 +126,23 @@ model PasswordResetToken {
 // ============================================
 
 model Group {
-  id            Int       @id @default(autoincrement())
-  name          String
-  description   String?
-  invite_code   String?   @unique
-  created_by_id Int
-  created_at    DateTime  @default(now())
-  updated_at    DateTime  @updatedAt
-  deleted_at    DateTime?
+  id                  Int       @id @default(autoincrement())
+  name                String
+  description         String?
+  invite_code         String?   @unique
+  created_by_id       Int
+  is_announcement     Boolean   @default(false)
+  only_admins_can_post Boolean  @default(false)
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+  deleted_at          DateTime?
 
-  creator       User               @relation("GroupCreator", fields: [created_by_id], references: [id])
-  members       GroupMember[]
-  messages      GroupMessage[]
-  join_requests GroupJoinRequest[]
+  creator         User               @relation("GroupCreator", fields: [created_by_id], references: [id])
+  members         GroupMember[]
+  messages        GroupMessage[]
+  join_requests   GroupJoinRequest[]
+  community_group CommunityGroup?
+  call_sessions   CallSession[]
 
   @@map("groups")
 }
@@ -167,6 +200,76 @@ model DirectMessage {
   receiver User @relation("ReceivedDirectMessages", fields: [receiver_id], references: [id], onDelete: Cascade)
 
   @@map("direct_messages")
+}
+
+// ============================================
+// Community Schema
+// ============================================
+
+model Community {
+  id            Int       @id @default(autoincrement())
+  name          String
+  description   String?
+  created_by_id Int
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  deleted_at    DateTime?
+
+  creator User              @relation("CommunityCreator", fields: [created_by_id], references: [id])
+  members CommunityMember[]
+  groups  CommunityGroup[]
+
+  @@map("communities")
+}
+
+model CommunityMember {
+  id           Int           @id @default(autoincrement())
+  community_id Int
+  user_id      Int
+  role         CommunityRole @default(COMMUNITY_MEMBER)
+  joined_at    DateTime      @default(now())
+
+  community Community @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([community_id, user_id])
+  @@map("community_members")
+}
+
+model CommunityGroup {
+  id              Int      @id @default(autoincrement())
+  community_id    Int
+  group_id        Int      @unique
+  is_announcement Boolean  @default(false)
+  added_at        DateTime @default(now())
+
+  community Community @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  group     Group     @relation(fields: [group_id], references: [id], onDelete: Cascade)
+
+  @@unique([community_id, group_id])
+  @@map("community_groups")
+}
+
+// ============================================
+// Call Session Schema
+// ============================================
+
+model CallSession {
+  id          Int        @id @default(autoincrement())
+  call_type   CallType   @default(DIRECT)
+  caller_id   Int
+  receiver_id Int?
+  group_id    Int?
+  status      CallStatus @default(COMPLETED)
+  started_at  DateTime   @default(now())
+  ended_at    DateTime?
+  duration    Int        @default(0) // seconds
+
+  caller   User   @relation("InitiatedCalls", fields: [caller_id], references: [id], onDelete: Cascade)
+  receiver User?  @relation("ReceivedCalls", fields: [receiver_id], references: [id], onDelete: SetNull)
+  group    Group? @relation(fields: [group_id], references: [id], onDelete: SetNull)
+
+  @@map("call_sessions")
 }
 
 // ============================================

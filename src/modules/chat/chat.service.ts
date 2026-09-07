@@ -576,13 +576,26 @@ export class ChatService {
   }
 
   async sendGroupMessage(userId: number, groupId: number, dto: SendGroupMessageDto) {
-    // Check membership
-    const membership = await this.prisma.groupMember.findFirst({
-      where: { group_id: groupId, user_id: userId },
+    const group = await this.prisma.group.findUnique({
+      where: { id: groupId },
+      include: {
+        members: {
+          where: { user_id: userId },
+        },
+      },
     });
 
+    if (!group) {
+      throw new NotFoundException('Grup tidak ditemukan');
+    }
+
+    const membership = group.members[0];
     if (!membership) {
-      throw new ForbiddenException('You must be a group member to send messages');
+      throw new ForbiddenException('Anda harus menjadi anggota grup untuk mengirim pesan');
+    }
+
+    if (group.only_admins_can_post && membership.role === GroupRole.MEMBER) {
+      throw new ForbiddenException('Hanya pengurus/admin yang dapat mengirim pesan di grup pengumuman ini.');
     }
 
     const message = await this.prisma.groupMessage.create({
@@ -704,5 +717,219 @@ export class ChatService {
         biodata: true,
       },
     });
+  }
+
+  // ====================================================================
+  // CHAT EXPORT (FR-EXP-01 s/d FR-EXP-04)
+  // ====================================================================
+
+  async exportGroupMessages(
+    userId: number,
+    groupId: number,
+    format: 'txt' | 'json',
+    startDate?: string,
+    endDate?: string,
+  ) {
+    const group = await this.prisma.group.findUnique({
+      where: { id: groupId },
+      include: {
+        members: {
+          where: { user_id: userId },
+        },
+      },
+    });
+
+    if (!group) {
+      throw new NotFoundException('Grup tidak ditemukan');
+    }
+
+    if (!group.members.length) {
+      throw new ForbiddenException('Ekspor riwayat grup dibatasi hanya untuk anggota aktif yang terdaftar.');
+    }
+
+    const dateFilter: any = {};
+    if (startDate) {
+      dateFilter.gte = new Date(startDate);
+    }
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      dateFilter.lte = end;
+    }
+
+    const where: any = { group_id: groupId };
+    if (startDate || endDate) {
+      where.created_at = dateFilter;
+    }
+
+    const messages = await this.prisma.groupMessage.findMany({
+      where,
+      include: {
+        sender: {
+          select: {
+            id: true,
+            email: true,
+            biodata: true,
+          },
+        },
+      },
+      orderBy: { created_at: 'asc' },
+    });
+
+    if (format === 'json') {
+      return {
+        contentType: 'application/json; charset=utf-8',
+        filename: `group_${group.id}_${group.name.replace(/[^a-zA-Z0-9_-]/g, '_')}_export.json`,
+        data: JSON.stringify(
+          {
+            type: 'group',
+            groupId: group.id,
+            groupName: group.name,
+            exportedAt: new Date().toISOString(),
+            dateRange: { startDate: startDate || null, endDate: endDate || null },
+            totalMessages: messages.length,
+            messages: messages.map((m) => ({
+              id: m.id,
+              timestamp: m.created_at,
+              senderId: m.sender_id,
+              senderName: m.sender.biodata
+                ? `${m.sender.biodata.first_name} ${m.sender.biodata.last_name}`
+                : m.sender.email,
+              senderEmail: m.sender.email,
+              content: m.content,
+            })),
+          },
+          null,
+          2,
+        ),
+      };
+    } else {
+      let txtContent = `====================================================\n`;
+      txtContent += `EKSPOR RIWAYAT CHAT GRUP: ${group.name}\n`;
+      txtContent += `Tanggal Ekspor : ${new Date().toLocaleString('id-ID')}\n`;
+      txtContent += `Filter Rentang : ${startDate ? startDate : 'Semua'} s/d ${endDate ? endDate : 'Semua'}\n`;
+      txtContent += `Total Pesan    : ${messages.length}\n`;
+      txtContent += `====================================================\n\n`;
+
+      for (const m of messages) {
+        const senderName = m.sender.biodata
+          ? `${m.sender.biodata.first_name} ${m.sender.biodata.last_name}`
+          : m.sender.email;
+        const timeStr = new Date(m.created_at).toISOString().replace('T', ' ').substring(0, 19);
+        txtContent += `[${timeStr}] ${senderName}: ${m.content}\n`;
+      }
+
+      return {
+        contentType: 'text/plain; charset=utf-8',
+        filename: `group_${group.id}_${group.name.replace(/[^a-zA-Z0-9_-]/g, '_')}_export.txt`,
+        data: txtContent,
+      };
+    }
+  }
+
+  async exportDirectMessages(
+    userId: number,
+    otherUserId: number,
+    format: 'txt' | 'json',
+    startDate?: string,
+    endDate?: string,
+  ) {
+    const otherUser = await this.prisma.user.findUnique({
+      where: { id: otherUserId },
+      include: { biodata: true },
+    });
+
+    if (!otherUser) {
+      throw new NotFoundException('Pengguna tidak ditemukan');
+    }
+
+    const otherName = otherUser.biodata
+      ? `${otherUser.biodata.first_name} ${otherUser.biodata.last_name}`
+      : otherUser.email;
+
+    const dateFilter: any = {};
+    if (startDate) {
+      dateFilter.gte = new Date(startDate);
+    }
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      dateFilter.lte = end;
+    }
+
+    const where: any = {
+      OR: [
+        { sender_id: userId, receiver_id: otherUserId },
+        { sender_id: otherUserId, receiver_id: userId },
+      ],
+    };
+
+    if (startDate || endDate) {
+      where.created_at = dateFilter;
+    }
+
+    const messages = await this.prisma.directMessage.findMany({
+      where,
+      include: {
+        sender: {
+          select: {
+            id: true,
+            email: true,
+            biodata: true,
+          },
+        },
+      },
+      orderBy: { created_at: 'asc' },
+    });
+
+    if (format === 'json') {
+      return {
+        contentType: 'application/json; charset=utf-8',
+        filename: `pc_${otherUserId}_${otherName.replace(/[^a-zA-Z0-9_-]/g, '_')}_export.json`,
+        data: JSON.stringify(
+          {
+            type: 'direct',
+            participantId: otherUserId,
+            participantName: otherName,
+            exportedAt: new Date().toISOString(),
+            dateRange: { startDate: startDate || null, endDate: endDate || null },
+            totalMessages: messages.length,
+            messages: messages.map((m) => ({
+              id: m.id,
+              timestamp: m.created_at,
+              senderId: m.sender_id,
+              senderName: m.sender.biodata
+                ? `${m.sender.biodata.first_name} ${m.sender.biodata.last_name}`
+                : m.sender.email,
+              senderEmail: m.sender.email,
+              content: m.content,
+            })),
+          },
+          null,
+          2,
+        ),
+      };
+    } else {
+      let txtContent = `====================================================\n`;
+      txtContent += `EKSPOR RIWAYAT CHAT PRIBADI: ${otherName}\n`;
+      txtContent += `Tanggal Ekspor : ${new Date().toLocaleString('id-ID')}\n`;
+      txtContent += `Filter Rentang : ${startDate ? startDate : 'Semua'} s/d ${endDate ? endDate : 'Semua'}\n`;
+      txtContent += `Total Pesan    : ${messages.length}\n`;
+      txtContent += `====================================================\n\n`;
+
+      for (const m of messages) {
+        const senderName = m.sender.biodata
+          ? `${m.sender.biodata.first_name} ${m.sender.biodata.last_name}`
+          : m.sender.email;
+        const timeStr = new Date(m.created_at).toISOString().replace('T', ' ').substring(0, 19);
+        txtContent += `[${timeStr}] ${senderName}: ${m.content}\n`;
+      }
+
+      return {
+        contentType: 'text/plain; charset=utf-8',
+        filename: `pc_${otherUserId}_${otherName.replace(/[^a-zA-Z0-9_-]/g, '_')}_export.txt`,
+        data: txtContent,
+      };
+    }
   }
 }

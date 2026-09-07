@@ -5,10 +5,11 @@
 // Global State
 const state = {
   currentUser: null,
-  activeTab: 'groups', // 'groups' | 'pc'
+  activeTab: 'groups', // 'groups' | 'pc' | 'communities'
   activeChat: null,    // { type: 'group' | 'pc', id: number, data: any }
   groups: [],
   conversations: [],
+  communities: [],
   notifications: [],
   usersCache: [],
 };
@@ -137,19 +138,22 @@ function setupEventListeners() {
     showToast('Logout', 'Anda telah berhasil keluar.', 'info', '👋');
   });
 
-  // Sidebar Tabs (Group vs PC)
+  // Sidebar Tabs (Group vs PC vs Communities)
   document.getElementById('tab-groups').addEventListener('click', () => switchTab('groups'));
   document.getElementById('tab-pc').addEventListener('click', () => switchTab('pc'));
+  document.getElementById('tab-communities').addEventListener('click', () => switchTab('communities'));
 
   // Search input filter
   document.getElementById('input-search-chat').addEventListener('input', (e) => {
     filterConversations(e.target.value.toLowerCase());
   });
 
-  // Create Group / New Chat button
+  // Create Group / New Chat / New Community button
   document.getElementById('btn-new-chat').addEventListener('click', () => {
     if (state.activeTab === 'groups') {
       openModal('modal-create-group');
+    } else if (state.activeTab === 'communities') {
+      openModal('modal-create-community');
     } else {
       openUserSelectModalForPC();
     }
@@ -166,6 +170,11 @@ function setupEventListeners() {
 
   // Create Group Form
   document.getElementById('form-create-group').addEventListener('submit', handleCreateGroup);
+
+  // Community & Export Forms
+  document.getElementById('form-create-community').addEventListener('submit', handleCreateCommunitySubmit);
+  document.getElementById('form-link-group').addEventListener('submit', handleLinkGroupSubmit);
+  document.getElementById('form-export-chat').addEventListener('submit', handleExportSubmit);
 
   // Add Member Form
   document.getElementById('form-add-member').addEventListener('submit', handleAddMember);
@@ -295,6 +304,48 @@ function setupSocketListeners() {
       }
     }
   });
+
+  // ==========================================
+  // WebRTC Voice Call Events (FR-CALL-01 s/d FR-CALL-05)
+  // ==========================================
+  socketClient.on('call:incoming', (data) => {
+    webrtcManager.handleIncomingCall(data);
+  });
+
+  socketClient.on('call:accepted', () => {
+    webrtcManager.updateCallStatusUI('Menghubungkan suara...');
+  });
+
+  socketClient.on('call:rejected', (data) => {
+    showToast('Panggilan Ditolak', data?.reason || 'Pihak penerima menolak panggilan.', 'info', '📞');
+    webrtcManager.endCall(false);
+  });
+
+  socketClient.on('call:ended', () => {
+    showToast('Panggilan Selesai', 'Panggilan suara telah berakhir.', 'info', '📞');
+    webrtcManager.endCall(false);
+  });
+
+  socketClient.on('call:signal', (data) => {
+    webrtcManager.handleSignal(data.senderId, data.signal);
+  });
+
+  socketClient.on('group_call:user_joined', (data) => {
+    showToast('Panggilan Grup', `${data.userName} bergabung ke panggilan.`, 'info', '👥');
+    webrtcManager.updateParticipantCountUI(data.participantsCount);
+  });
+
+  socketClient.on('group_call:user_left', (data) => {
+    webrtcManager.updateParticipantCountUI(data.participantsCount);
+  });
+
+  socketClient.on('group_call:signal', (data) => {
+    webrtcManager.handleGroupSignal(data.senderSocketId, data.signal);
+  });
+
+  socketClient.on('group_call:error', (data) => {
+    showToast('Panggilan Grup Penuh', data.message, 'error', '👥');
+  });
 }
 
 // ==========================================================================
@@ -389,9 +440,16 @@ function switchTab(tab) {
   state.activeTab = tab;
   document.getElementById('tab-groups').classList.toggle('active', tab === 'groups');
   document.getElementById('tab-pc').classList.toggle('active', tab === 'pc');
+  document.getElementById('tab-communities').classList.toggle('active', tab === 'communities');
 
   const btnNewChatLabel = document.getElementById('btn-new-chat-label');
-  btnNewChatLabel.textContent = tab === 'groups' ? '+ Buat Grup' : '+ Pesan PC';
+  if (tab === 'groups') {
+    btnNewChatLabel.textContent = '+ Buat Grup';
+  } else if (tab === 'pc') {
+    btnNewChatLabel.textContent = '+ Pesan PC';
+  } else if (tab === 'communities') {
+    btnNewChatLabel.textContent = '+ Komunitas';
+  }
 
   const btnJoinByLink = document.getElementById('btn-join-by-link');
   if (btnJoinByLink) {
@@ -410,10 +468,14 @@ async function loadConversations() {
       const groups = await api.getMyGroups();
       state.groups = groups || [];
       renderGroupList(state.groups);
-    } else {
+    } else if (state.activeTab === 'pc') {
       const convos = await api.getConversations();
       state.conversations = convos || [];
       renderPCList(state.conversations);
+    } else if (state.activeTab === 'communities') {
+      const communities = await api.getMyCommunities();
+      state.communities = communities || [];
+      renderCommunityList(state.communities);
     }
   } catch (err) {
     container.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
@@ -474,16 +536,95 @@ function renderPCList(contacts) {
   }).join('');
 }
 
+function renderCommunityList(communities) {
+  const container = document.getElementById('conversation-list');
+  if (!communities || communities.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state" style="padding:24px 16px;">
+        <div style="font-size:2rem; margin-bottom:8px;">👥</div>
+        <p>Belum ada komunitas yang diikuti.<br>Klik "<strong>+ Komunitas</strong>" untuk membuat baru!</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = communities.map((comm) => {
+    const memberCount = comm.members?.length || 0;
+    const isOwnerOrAdmin = comm.members.some(
+      (m) => m.user_id === state.currentUser?.id && (m.role === 'COMMUNITY_OWNER' || m.role === 'COMMUNITY_ADMIN')
+    );
+
+    const subgroupsHtml = (comm.groups || []).map((cg) => {
+      const g = cg.group;
+      const isAnnounce = cg.is_announcement || g.is_announcement;
+      return `
+        <div class="subgroup-item" onclick="selectSubgroupChat(${g.id})">
+          <span class="subgroup-name">
+            ${isAnnounce ? '📢' : '💬'} ${escapeHtml(g.name)}
+            ${isAnnounce ? '<span class="badge-announcement">Pengumuman</span>' : ''}
+          </span>
+          <span style="font-size:0.75rem; color:var(--text-muted);">${g._count?.members || 0} anggota</span>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="community-item">
+        <div class="community-header-item">
+          <div class="community-avatar">${(comm.name || 'C').charAt(0).toUpperCase()}</div>
+          <div class="community-info">
+            <div class="community-name">${escapeHtml(comm.name)}</div>
+            <div class="community-meta">${memberCount} Anggota • ${(comm.groups || []).length} Sub-grup</div>
+          </div>
+          ${isOwnerOrAdmin ? `<button class="btn btn-outline btn-sm" style="padding:4px 8px; font-size:0.75rem;" onclick="event.stopPropagation(); openLinkGroupModal(${comm.id})" title="Tautkan Grup ke Komunitas">🔗 Tautkan</button>` : ''}
+        </div>
+        <div class="community-subgroups-list">
+          ${subgroupsHtml || '<div style="padding:8px 12px; font-size:0.75rem; color:var(--text-muted);">Belum ada sub-grup tertaut.</div>'}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function selectSubgroupChat(groupId) {
+  // Check if group is already in state.groups
+  let group = state.groups.find((g) => g.id === groupId);
+  if (!group) {
+    const allGroups = await api.getMyGroups();
+    state.groups = allGroups || [];
+    group = state.groups.find((g) => g.id === groupId);
+  }
+  if (group) {
+    selectGroupChat(groupId);
+  } else {
+    // If user is not yet member of this sub-group, show join prompt
+    if (confirm('Anda belum terdaftar di sub-grup ini. Bergabung sekarang?')) {
+      try {
+        await api.joinGroup(groupId);
+        showToast('Bergabung', 'Berhasil bergabung ke sub-grup!', 'success', '🎉');
+        const allGroups = await api.getMyGroups();
+        state.groups = allGroups || [];
+        selectGroupChat(groupId);
+      } catch (e) {
+        showToast('Gagal Bergabung', e.message, 'error', '❌');
+      }
+    }
+  }
+}
+
 function filterConversations(query) {
   if (state.activeTab === 'groups') {
     const filtered = state.groups.filter((g) => g.name.toLowerCase().includes(query));
     renderGroupList(filtered);
-  } else {
+  } else if (state.activeTab === 'pc') {
     const filtered = state.conversations.filter((u) => {
       const name = u.biodata ? `${u.biodata.first_name} ${u.biodata.last_name}` : u.email;
       return name.toLowerCase().includes(query) || u.email.toLowerCase().includes(query);
     });
     renderPCList(filtered);
+  } else if (state.activeTab === 'communities') {
+    const filtered = state.communities.filter((c) => c.name.toLowerCase().includes(query));
+    renderCommunityList(filtered);
   }
 }
 
@@ -519,11 +660,36 @@ async function selectGroupChat(groupId) {
     (currentMember && (currentMember.role === 'OWNER' || currentMember.role === 'ADMIN')) ||
     state.currentUser?.biodata?.role === 'ADMIN';
 
-  // Header action buttons
+  // Check announcement restrictions (FR-COM-02)
+  const isAnnouncement = group.is_announcement || group.only_admins_can_post;
+  const isReadOnlyForMe = isAnnouncement && !isStaff;
+  const banner = document.getElementById('announcement-readonly-banner');
+  const inputMessage = document.getElementById('input-message');
+  const btnSend = document.getElementById('btn-send');
+
+  if (isReadOnlyForMe) {
+    if (banner) banner.classList.remove('hidden');
+    if (inputMessage) {
+      inputMessage.disabled = true;
+      inputMessage.placeholder = 'Hanya pengurus/admin yang dapat mengirim pesan di grup pengumuman ini.';
+    }
+    if (btnSend) btnSend.disabled = true;
+  } else {
+    if (banner) banner.classList.add('hidden');
+    if (inputMessage) {
+      inputMessage.disabled = false;
+      inputMessage.placeholder = 'Ketik pesan Anda di sini... (Tekan Enter untuk kirim)';
+    }
+    if (btnSend) btnSend.disabled = false;
+  }
+
+  // Header action buttons (Panggilan, Ekspor, Tambah, Tautan, Detail)
   const actionsContainer = document.getElementById('chat-header-actions');
   actionsContainer.innerHTML = `
-    ${isStaff ? `<button class="btn btn-outline btn-sm" onclick="openAddMemberModal(${groupId})">➕ Tambah Member</button>` : ''}
-    ${isStaff ? `<button class="btn btn-outline btn-sm" onclick="openGroupInviteModal(${groupId})">🔗 Tautan Undangan</button>` : ''}
+    <button class="btn btn-outline btn-sm" onclick="webrtcManager.startGroupCall(${groupId}, '${escapeHtml(group.name)}')" title="Mulai Panggilan Suara Grup">📞 Panggilan</button>
+    <button class="btn btn-outline btn-sm" onclick="openExportModal('group', ${groupId})" title="Unduh Arsip Chat">📥 Ekspor</button>
+    ${isStaff ? `<button class="btn btn-outline btn-sm" onclick="openAddMemberModal(${groupId})">➕ Tambah</button>` : ''}
+    ${isStaff ? `<button class="btn btn-outline btn-sm" onclick="openGroupInviteModal(${groupId})">🔗 Tautan</button>` : ''}
     <button class="btn btn-outline btn-sm" onclick="toggleInfoDrawer()">ℹ️ Detail</button>
   `;
 
@@ -546,6 +712,17 @@ async function selectPCChat(userId) {
 
   state.activeChat = { type: 'pc', id: userId, data: contact };
 
+  // Reset announcement banner and restore input
+  const banner = document.getElementById('announcement-readonly-banner');
+  const inputMessage = document.getElementById('input-message');
+  const btnSend = document.getElementById('btn-send');
+  if (banner) banner.classList.add('hidden');
+  if (inputMessage) {
+    inputMessage.disabled = false;
+    inputMessage.placeholder = 'Ketik pesan Anda di sini... (Tekan Enter untuk kirim)';
+  }
+  if (btnSend) btnSend.disabled = false;
+
   // Update sidebar
   renderPCList(state.conversations);
   document.getElementById('app-sidebar').classList.remove('open');
@@ -561,6 +738,8 @@ async function selectPCChat(userId) {
   document.getElementById('active-chat-subtitle').textContent = contact.email;
 
   document.getElementById('chat-header-actions').innerHTML = `
+    <button class="btn btn-outline btn-sm" onclick="webrtcManager.startDirectCall(${userId}, '${escapeHtml(name)}')" title="Panggilan Suara Pribadi">📞 Panggilan</button>
+    <button class="btn btn-outline btn-sm" onclick="openExportModal('pc', ${userId})" title="Unduh Arsip Chat">📥 Ekspor</button>
     <button class="btn btn-outline btn-sm" onclick="toggleInfoDrawer()">ℹ️ Profil</button>
   `;
 
@@ -1418,4 +1597,145 @@ function openModal(id) {
 function closeModal(id) {
   const modal = document.getElementById(id);
   if (modal) modal.classList.add('hidden');
+}
+
+// ==========================================================================
+// Chat Export Handlers (FR-EXP-01 s/d FR-EXP-04)
+// ==========================================================================
+let currentExportContext = { type: 'group', id: null };
+
+function openExportModal(type, id) {
+  currentExportContext = { type, id };
+  openModal('modal-export-chat');
+  const txtRadio = document.querySelector('input[name="export-format"][value="txt"]');
+  const allRadio = document.querySelector('input[name="export-range"][value="all"]');
+  if (txtRadio) txtRadio.checked = true;
+  if (allRadio) allRadio.checked = true;
+  toggleExportDateInputs(false);
+  const startInput = document.getElementById('export-start-date');
+  const endInput = document.getElementById('export-end-date');
+  if (startInput) startInput.value = '';
+  if (endInput) endInput.value = '';
+}
+
+function toggleExportDateInputs(show) {
+  const fields = document.getElementById('export-date-fields');
+  if (fields) {
+    if (show) fields.classList.remove('hidden');
+    else fields.classList.add('hidden');
+  }
+}
+
+async function handleExportSubmit(e) {
+  e.preventDefault();
+  if (!currentExportContext.id) return;
+
+  const format = document.querySelector('input[name="export-format"]:checked')?.value || 'txt';
+  const rangeType = document.querySelector('input[name="export-range"]:checked')?.value || 'all';
+  const startDate = rangeType === 'range' ? document.getElementById('export-start-date').value : '';
+  const endDate = rangeType === 'range' ? document.getElementById('export-end-date').value : '';
+
+  const submitBtn = document.getElementById('btn-submit-export');
+  const originalText = submitBtn.innerHTML;
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = 'Mengunduh... ⏳';
+
+  try {
+    let result;
+    if (currentExportContext.type === 'group') {
+      result = await api.exportGroupChat(currentExportContext.id, format, startDate, endDate);
+    } else {
+      result = await api.exportPCChat(currentExportContext.id, format, startDate, endDate);
+    }
+
+    // Trigger browser file download
+    const url = window.URL.createObjectURL(result.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = result.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+
+    closeModal('modal-export-chat');
+    showToast('Ekspor Berhasil', `Berkas ${result.filename} berhasil diunduh.`, 'success', '💾');
+  } catch (err) {
+    showToast('Gagal Ekspor', err.message, 'error', '❌');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = originalText;
+  }
+}
+
+// ==========================================================================
+// Community Handlers (FR-COM-01 s/d FR-COM-05)
+// ==========================================================================
+let activeCommunityIdForLink = null;
+
+async function openLinkGroupModal(communityId) {
+  activeCommunityIdForLink = communityId;
+  openModal('modal-link-group');
+  const select = document.getElementById('select-group-to-link');
+  select.innerHTML = '<option value="">Memuat grup yang Anda kelola...</option>';
+
+  try {
+    // Filter groups where current user is OWNER or ADMIN
+    const myGroups = await api.getMyGroups();
+    const managedGroups = (myGroups || []).filter((g) => {
+      const mem = (g.members || []).find((m) => m.user_id === state.currentUser?.id);
+      return mem && (mem.role === 'OWNER' || mem.role === 'ADMIN');
+    });
+
+    if (managedGroups.length === 0) {
+      select.innerHTML = '<option value="">Tidak ada grup yang Anda kelola (Owner/Admin)</option>';
+      return;
+    }
+
+    select.innerHTML = '<option value="">-- Pilih Grup yang Dikelola --</option>' +
+      managedGroups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)} (${g.members?.length || 0} anggota)</option>`).join('');
+  } catch (err) {
+    select.innerHTML = '<option value="">Gagal memuat grup</option>';
+  }
+}
+
+async function handleLinkGroupSubmit(e) {
+  e.preventDefault();
+  if (!activeCommunityIdForLink) return;
+
+  const select = document.getElementById('select-group-to-link');
+  const groupId = select.value;
+  if (!groupId) return;
+
+  try {
+    const res = await api.linkGroupToCommunity(activeCommunityIdForLink, groupId);
+    closeModal('modal-link-group');
+    showToast('Grup Ditautkan', res.message, 'success', '🔗');
+    loadConversations();
+  } catch (err) {
+    showToast('Gagal Menautkan', err.message, 'error', '❌');
+  }
+}
+
+async function handleCreateCommunitySubmit(e) {
+  e.preventDefault();
+  const name = document.getElementById('community-name').value.trim();
+  const description = document.getElementById('community-desc').value.trim();
+  if (!name) return;
+
+  try {
+    const newCommunity = await api.createCommunity(name, description);
+    closeModal('modal-create-community');
+    document.getElementById('form-create-community').reset();
+    showToast('Komunitas Dibuat', `Komunitas "${name}" berhasil dibuat dengan sub-grup Pengumuman default!`, 'success', '🎉');
+    await loadConversations();
+
+    // Auto-select announcement group if exists
+    const announcementGroup = (newCommunity.groups || []).find((g) => g.is_announcement);
+    if (announcementGroup) {
+      selectGroupChat(announcementGroup.group_id);
+    }
+  } catch (err) {
+    showToast('Gagal Membuat Komunitas', err.message, 'error', '❌');
+  }
 }

@@ -5,9 +5,12 @@ import {
   Delete,
   Body,
   Param,
+  Query,
+  Res,
   ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ChatService } from '../../chat.service';
 import { CreateGroupDto } from '../../dto/create-group.dto';
@@ -194,5 +197,57 @@ export class ChatController {
     @Param('userId', ParseIntPipe) otherUserId: number,
   ) {
     return this.chatService.getDirectMessages(userId, otherUserId);
+  }
+
+  // ==========================================
+  // CHAT EXPORT ENDPOINTS (FR-EXP-01 - FR-EXP-04)
+  // ==========================================
+
+  @Get('groups/:id/export')
+  @ApiOperation({ summary: 'Export group chat messages (.txt or .json)' })
+  async exportGroup(
+    @GetUser('userId') userId: number,
+    @Param('id', ParseIntPipe) groupId: number,
+    @Query('format') format: 'txt' | 'json' = 'txt',
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+    @Res() res: Response,
+  ) {
+    const validFormat = format === 'json' ? 'json' : 'txt';
+    const result = await this.chatService.exportGroupMessages(
+      userId,
+      groupId,
+      validFormat,
+      startDate,
+      endDate,
+    );
+
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    return res.send(result.data);
+  }
+
+  @Get('pc/:userId/export')
+  @ApiOperation({ summary: 'Export personal chat messages (.txt or .json)' })
+  async exportDirect(
+    @GetUser('userId') userId: number,
+    @Param('userId', ParseIntPipe) otherUserId: number,
+    @Query('format') format: 'txt' | 'json' = 'txt',
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+    @Res() res: Response,
+  ) {
+    const validFormat = format === 'json' ? 'json' : 'txt';
+    const result = await this.chatService.exportDirectMessages(
+      userId,
+      otherUserId,
+      validFormat,
+      startDate,
+      endDate,
+    );
+
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    return res.send(result.data);
   }
 }

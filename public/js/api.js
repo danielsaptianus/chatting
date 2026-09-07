@@ -264,4 +264,99 @@ const api = {
       method: 'PATCH',
     });
   },
+
+  // ==========================================
+  // COMMUNITIES (FR-COM-01 s/d FR-COM-05)
+  // ==========================================
+  async createCommunity(name, description) {
+    return this.request('/communities', {
+      method: 'POST',
+      body: JSON.stringify({ name, description }),
+    });
+  },
+
+  async getMyCommunities() {
+    return this.request('/communities');
+  },
+
+  async getCommunityDetails(id) {
+    return this.request(`/communities/${id}`);
+  },
+
+  async joinCommunity(id) {
+    return this.request(`/communities/${id}/join`, {
+      method: 'POST',
+    });
+  },
+
+  async linkGroupToCommunity(communityId, groupId) {
+    return this.request(`/communities/${communityId}/groups`, {
+      method: 'POST',
+      body: JSON.stringify({ groupId: Number(groupId) }),
+    });
+  },
+
+  async getCommunityGroups(communityId) {
+    return this.request(`/communities/${communityId}/groups`);
+  },
+
+  async removeCommunityMember(communityId, userId) {
+    return this.request(`/communities/${communityId}/members/${userId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // ==========================================
+  // CHAT EXPORT (FR-EXP-01 s/d FR-EXP-04)
+  // ==========================================
+  async exportGroupChat(groupId, format = 'txt', startDate = '', endDate = '') {
+    const params = new URLSearchParams({ format });
+    if (startDate) params.append('startDate', startDate);
+    if (endDate) params.append('endDate', endDate);
+
+    const token = this.getToken();
+    const res = await fetch(`${this.baseUrl}/chat/groups/${groupId}/export?${params.toString()}`, {
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || 'Gagal mengekspor chat grup');
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition') || '';
+    let filename = `group_${groupId}_export.${format}`;
+    if (disposition.includes('filename="')) {
+      filename = disposition.split('filename="')[1].split('"')[0];
+    }
+    return { blob, filename };
+  },
+
+  async exportPCChat(userId, format = 'txt', startDate = '', endDate = '') {
+    const params = new URLSearchParams({ format });
+    if (startDate) params.append('startDate', startDate);
+    if (endDate) params.append('endDate', endDate);
+
+    const token = this.getToken();
+    const res = await fetch(`${this.baseUrl}/chat/pc/${userId}/export?${params.toString()}`, {
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || 'Gagal mengekspor chat pribadi');
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition') || '';
+    let filename = `pc_${userId}_export.${format}`;
+    if (disposition.includes('filename="')) {
+      filename = disposition.split('filename="')[1].split('"')[0];
+    }
+    return { blob, filename };
+  },
+
+  // ==========================================
+  // VOICE CALLS
+  // ==========================================
+  async getCallHistory() {
+    return this.request('/calls/history');
+  },
 };

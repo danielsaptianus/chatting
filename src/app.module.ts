@@ -22,6 +22,8 @@ import { UsersModule } from './modules/users/users.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { HealthModule } from './modules/health/health.module';
+import { CommunitiesModule } from './modules/communities/communities.module';
+import { CallsModule } from './modules/calls/calls.module';
 
 @Module({
   imports: [
@@ -41,6 +43,8 @@ import { HealthModule } from './modules/health/health.module';
     ChatModule,
     NotificationsModule,
     HealthModule,
+    CommunitiesModule,
+    CallsModule,
   ],
   providers: [
     // Global guards
