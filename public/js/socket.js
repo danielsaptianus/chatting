@@ -6,12 +6,7 @@ class SocketClient {
   constructor() {
     this.socket = null;
     this.connected = false;
-    this.handlers = {
-      notification: [],
-      group_message: [],
-      pc_message: [],
-      status_change: [],
-    };
+    this.handlers = {};
   }
 
   connect() {
@@ -51,22 +46,18 @@ class SocketClient {
       this.notifyStatus(false);
     });
 
-    // Real-time notification event
-    this.socket.on('notification', (payload) => {
-      console.log('🔔 [WS Event] Notification received:', payload);
-      this.trigger('notification', payload);
+    // Bind all registered event handlers to this socket instance
+    Object.keys(this.handlers).forEach((event) => {
+      this.bindSocketEvent(event);
     });
+  }
 
-    // Real-time group message event
-    this.socket.on('group_message', (payload) => {
-      console.log('💬 [WS Event] Group Message received:', payload);
-      this.trigger('group_message', payload);
-    });
-
-    // Real-time personal chat (PC) event
-    this.socket.on('pc_message', (payload) => {
-      console.log('✉️ [WS Event] PC Message received:', payload);
-      this.trigger('pc_message', payload);
+  bindSocketEvent(event) {
+    if (!this.socket) return;
+    this.socket.off(event);
+    this.socket.on(event, (payload) => {
+      console.log(`📡 [WS Event] '${event}':`, payload);
+      this.trigger(event, payload);
     });
   }
 
@@ -92,8 +83,22 @@ class SocketClient {
   }
 
   on(event, callback) {
-    if (this.handlers[event]) {
-      this.handlers[event].push(callback);
+    if (!this.handlers[event]) {
+      this.handlers[event] = [];
+      if (this.socket) {
+        this.bindSocketEvent(event);
+      }
+    }
+    this.handlers[event].push(callback);
+  }
+
+  off(event, callback) {
+    if (!this.handlers[event]) return;
+    if (!callback) {
+      this.handlers[event] = [];
+      if (this.socket) this.socket.off(event);
+    } else {
+      this.handlers[event] = this.handlers[event].filter((cb) => cb !== callback);
     }
   }
 

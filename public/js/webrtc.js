@@ -102,7 +102,17 @@ class WebRTCManager {
   // 1-on-1 Call Flow (FR-CALL-01, FR-CALL-03, FR-CALL-04, FR-CALL-05)
   // =========================================================================
   async startDirectCall(receiverId, receiverName) {
-    await this.getLocalMedia();
+    if (!socketClient.socket || !socketClient.connected) {
+      showToast('Koneksi Terputus', 'Koneksi real-time belum terhubung. Coba beberapa saat lagi.', 'warning', '⚠️');
+      return;
+    }
+
+    try {
+      await this.getLocalMedia();
+    } catch (err) {
+      showToast('Akses Mikrofon Gagal', err.message, 'error', '🎙️');
+      return;
+    }
 
     // Show active call dialog in "Calling..." state
     this.showActiveCallUI({

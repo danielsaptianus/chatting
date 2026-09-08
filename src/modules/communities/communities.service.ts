@@ -116,6 +116,44 @@ export class CommunitiesService {
   }
 
   // ==========================================
+  // GET ALL COMMUNITIES (FOR EXPLORE / JOIN)
+  // ==========================================
+  async getAllCommunities(userId: number) {
+    return this.prisma.community.findMany({
+      where: {
+        deleted_at: null,
+      },
+      include: {
+        creator: {
+          select: { id: true, email: true, biodata: true },
+        },
+        members: {
+          include: {
+            user: {
+              select: { id: true, email: true, biodata: true },
+            },
+          },
+        },
+        groups: {
+          include: {
+            group: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+                is_announcement: true,
+                only_admins_can_post: true,
+                _count: { select: { members: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+  }
+
+  // ==========================================
   // GET COMMUNITY DETAILS
   // ==========================================
   async getCommunityDetails(communityId: number, userId: number) {

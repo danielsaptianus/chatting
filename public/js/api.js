@@ -279,6 +279,10 @@ const api = {
     return this.request('/communities');
   },
 
+  async getAllCommunities() {
+    return this.request('/communities/all');
+  },
+
   async getCommunityDetails(id) {
     return this.request(`/communities/${id}`);
   },
@@ -315,7 +319,7 @@ const api = {
     if (endDate) params.append('endDate', endDate);
 
     const token = this.getToken();
-    const res = await fetch(`${this.baseUrl}/chat/groups/${groupId}/export?${params.toString()}`, {
+    const res = await fetch(`${API_BASE}/chat/groups/${groupId}/export?${params.toString()}`, {
       headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     });
     if (!res.ok) {
@@ -337,7 +341,7 @@ const api = {
     if (endDate) params.append('endDate', endDate);
 
     const token = this.getToken();
-    const res = await fetch(`${this.baseUrl}/chat/pc/${userId}/export?${params.toString()}`, {
+    const res = await fetch(`${API_BASE}/chat/pc/${userId}/export?${params.toString()}`, {
       headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     });
     if (!res.ok) {
@@ -354,8 +358,9 @@ const api = {
   },
 
   // ==========================================
-  // VOICE CALLS
+  // VOICE CALLS & CALL HISTORY
   // ==========================================
+
   async getCallHistory() {
     return this.request('/calls/history');
   },

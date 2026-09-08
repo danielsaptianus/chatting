@@ -43,6 +43,8 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (token) {
         const payload = this.jwtService.verify(token);
         client.data.user = payload;
+        await client.join(`user_${payload.userId}`);
+        this.logger.log(`Calls client ${client.id} joined user_${payload.userId}`);
       }
     } catch (err) {
       // Handled in NotificationsGateway

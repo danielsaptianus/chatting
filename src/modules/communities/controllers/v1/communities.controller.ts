@@ -37,6 +37,12 @@ export class CommunitiesController {
     return this.communitiesService.getMyCommunities(userId);
   }
 
+  @Get('all')
+  @ApiOperation({ summary: 'Get all communities for exploration' })
+  async getAllCommunities(@GetUser('userId') userId: number) {
+    return this.communitiesService.getAllCommunities(userId);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get community details' })
   async getCommunityDetails(

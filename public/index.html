@@ -201,9 +201,13 @@
           <!-- Chat Header -->
           <div class="chat-header glass-panel">
             <div class="chat-header-info">
+              <button id="btn-back-to-community" class="btn-icon hidden" title="Kembali ke Hub Komunitas" style="margin-right:6px; font-size:1.1rem; padding:4px 8px; border-radius:var(--radius-sm);">⬅️</button>
               <div class="chat-avatar" id="active-chat-avatar">G</div>
               <div>
-                <h3 id="active-chat-title">Nama Percakapan</h3>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <h3 id="active-chat-title">Nama Percakapan</h3>
+                  <span id="active-chat-community-badge" class="badge-role badge-admin hidden" style="font-size:0.68rem; padding:2px 6px;">Komunitas</span>
+                </div>
                 <p id="active-chat-subtitle" class="chat-subtitle">0 Anggota</p>
               </div>
             </div>
@@ -236,6 +240,63 @@
                 <span>Kirim 🚀</span>
               </button>
             </form>
+          </div>
+        </div>
+
+        <!-- Community Hub Window (FR-COM-01 s/d FR-COM-05) -->
+        <div id="community-active-window" class="community-active-window hidden">
+          <!-- Community Hub Header -->
+          <div class="community-hub-header glass-panel">
+            <div class="community-hub-profile">
+              <div class="community-hub-avatar" id="community-hub-avatar">👥</div>
+              <div class="community-hub-meta">
+                <div class="community-hub-title-row">
+                  <h2 id="community-hub-name">Nama Komunitas</h2>
+                  <span id="community-hub-badge" class="badge-role badge-admin">Komunitas</span>
+                </div>
+                <p id="community-hub-desc" class="community-hub-description">Deskripsi komunitas...</p>
+                <div class="community-hub-stats" id="community-hub-stats">
+                  <span>👥 0 Anggota</span> • <span>📂 0 Sub-grup</span>
+                </div>
+              </div>
+            </div>
+            <div class="community-hub-actions" id="community-hub-actions">
+              <!-- Dynamically populated: Gabung, Tautkan Grup, Kelola Anggota -->
+            </div>
+          </div>
+
+          <!-- Community Hub Content -->
+          <div class="community-hub-body">
+            <!-- Official Announcement Card -->
+            <div class="community-section">
+              <h3 class="community-section-title">📢 Saluran Pengumuman Resmi</h3>
+              <div id="community-announcement-card" class="community-card announcement-card glass-panel">
+                <div class="announcement-card-info">
+                  <div class="announcement-icon">📢</div>
+                  <div>
+                    <h4 id="announcement-group-name" style="margin:0 0 4px 0; font-size:1rem; font-weight:600;">Pengumuman Komunitas</h4>
+                    <p id="announcement-group-desc" style="margin:0; font-size:0.82rem; color:var(--text-secondary);">Ruang obrolan resmi untuk informasi penting dari pengurus komunitas.</p>
+                  </div>
+                </div>
+                <button id="btn-open-announcement" class="btn btn-primary btn-sm">
+                  <span>Buka Pengumuman 💬</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Linked Sub-groups Section (FR-COM-04) -->
+            <div class="community-section">
+              <div class="community-section-header">
+                <div>
+                  <h3 class="community-section-title">📂 Sub-Grup dalam Komunitas</h3>
+                  <p class="community-section-subtitle">Jelajahi dan pilih sub-grup obrolan yang tersedia dalam komunitas ini.</p>
+                </div>
+                <span id="community-subgroups-count" class="badge-count" style="align-self:flex-start;">0 Sub-grup</span>
+              </div>
+              <div id="community-subgroups-grid" class="community-subgroups-grid">
+                <!-- Dynamically populated sub-group cards -->
+              </div>
+            </div>
           </div>
         </div>
       </main>
@@ -657,6 +718,27 @@
           <button type="submit" class="btn btn-primary">Tautkan Grup 🔗</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Modal: Kelola Anggota Komunitas (FR-COM-05) -->
+  <div id="modal-community-members" class="modal-overlay hidden">
+    <div class="modal-dialog glass-panel" style="max-width:540px;">
+      <div class="modal-header">
+        <h3 id="community-members-modal-title">👥 Anggota Komunitas</h3>
+        <button class="btn-icon" onclick="closeModal('modal-community-members')">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:12px;">
+          Daftar anggota komunitas. Pengurus berhak mengeluarkan anggota dari komunitas beserta seluruh sub-grupnya (FR-COM-05).
+        </p>
+        <div id="community-members-list" style="max-height:360px; overflow-y:auto; display:flex; flex-direction:column; gap:8px;">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-community-members')">Tutup</button>
+      </div>
     </div>
   </div>
 

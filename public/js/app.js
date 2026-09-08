@@ -7,6 +7,8 @@ const state = {
   currentUser: null,
   activeTab: 'groups', // 'groups' | 'pc' | 'communities'
   activeChat: null,    // { type: 'group' | 'pc', id: number, data: any }
+  activeCommunity: null,
+  communityTabFilter: 'my', // 'my' | 'all'
   groups: [],
   conversations: [],
   communities: [],
@@ -473,7 +475,12 @@ async function loadConversations() {
       state.conversations = convos || [];
       renderPCList(state.conversations);
     } else if (state.activeTab === 'communities') {
-      const communities = await api.getMyCommunities();
+      let communities = [];
+      if (state.communityTabFilter === 'all') {
+        communities = await api.getAllCommunities();
+      } else {
+        communities = await api.getMyCommunities();
+      }
       state.communities = communities || [];
       renderCommunityList(state.communities);
     }
@@ -536,21 +543,34 @@ function renderPCList(contacts) {
   }).join('');
 }
 
+function setCommunityFilter(filter) {
+  state.communityTabFilter = filter;
+  loadConversations();
+}
+
 function renderCommunityList(communities) {
   const container = document.getElementById('conversation-list');
+  const filterPills = `
+    <div class="community-filter-toggle">
+      <button class="filter-pill ${state.communityTabFilter === 'my' ? 'active' : ''}" onclick="setCommunityFilter('my')">Komunitas Saya</button>
+      <button class="filter-pill ${state.communityTabFilter === 'all' ? 'active' : ''}" onclick="setCommunityFilter('all')">Jelajahi Semua</button>
+    </div>
+  `;
+
   if (!communities || communities.length === 0) {
-    container.innerHTML = `
+    container.innerHTML = filterPills + `
       <div class="empty-state" style="padding:24px 16px;">
         <div style="font-size:2rem; margin-bottom:8px;">👥</div>
-        <p>Belum ada komunitas yang diikuti.<br>Klik "<strong>+ Komunitas</strong>" untuk membuat baru!</p>
+        <p>${state.communityTabFilter === 'all' ? 'Belum ada komunitas yang terdaftar di platform.' : 'Belum ada komunitas yang Anda ikuti.<br>Klik "<strong>+ Komunitas</strong>" atau beralih ke tab "<strong>Jelajahi Semua</strong>"!'}</p>
       </div>
     `;
     return;
   }
 
-  container.innerHTML = communities.map((comm) => {
+  const cardsHtml = communities.map((comm) => {
     const memberCount = comm.members?.length || 0;
-    const isOwnerOrAdmin = comm.members.some(
+    const isMember = comm.members?.some((m) => m.user_id === state.currentUser?.id);
+    const isOwnerOrAdmin = comm.members?.some(
       (m) => m.user_id === state.currentUser?.id && (m.role === 'COMMUNITY_OWNER' || m.role === 'COMMUNITY_ADMIN')
     );
 
@@ -558,7 +578,7 @@ function renderCommunityList(communities) {
       const g = cg.group;
       const isAnnounce = cg.is_announcement || g.is_announcement;
       return `
-        <div class="subgroup-item" onclick="selectSubgroupChat(${g.id})">
+        <div class="subgroup-item" onclick="event.stopPropagation(); selectSubgroupChat(${g.id}, ${comm.id})">
           <span class="subgroup-name">
             ${isAnnounce ? '📢' : '💬'} ${escapeHtml(g.name)}
             ${isAnnounce ? '<span class="badge-announcement">Pengumuman</span>' : ''}
@@ -570,13 +590,19 @@ function renderCommunityList(communities) {
 
     return `
       <div class="community-item">
-        <div class="community-header-item">
+        <div class="community-header-item" style="cursor:pointer;" onclick="selectCommunityHub(${comm.id})">
           <div class="community-avatar">${(comm.name || 'C').charAt(0).toUpperCase()}</div>
           <div class="community-info">
             <div class="community-name">${escapeHtml(comm.name)}</div>
-            <div class="community-meta">${memberCount} Anggota • ${(comm.groups || []).length} Sub-grup</div>
+            <div class="community-meta">
+              ${memberCount} Anggota • ${(comm.groups || []).length} Sub-grup
+              ${!isMember ? '<span style="color:var(--primary); font-weight:600; margin-left:4px;">(Jelajah)</span>' : ''}
+            </div>
           </div>
-          ${isOwnerOrAdmin ? `<button class="btn btn-outline btn-sm" style="padding:4px 8px; font-size:0.75rem;" onclick="event.stopPropagation(); openLinkGroupModal(${comm.id})" title="Tautkan Grup ke Komunitas">🔗 Tautkan</button>` : ''}
+          ${isOwnerOrAdmin 
+            ? `<button class="btn btn-outline btn-sm" style="padding:4px 8px; font-size:0.75rem;" onclick="event.stopPropagation(); openLinkGroupModal(${comm.id})" title="Tautkan Grup ke Komunitas">🔗 Tautkan</button>` 
+            : (!isMember ? `<button class="btn btn-primary btn-sm" style="padding:4px 8px; font-size:0.75rem;" onclick="event.stopPropagation(); handleJoinCommunity(${comm.id})" title="Gabung Komunitas">➕ Gabung</button>` : '')
+          }
         </div>
         <div class="community-subgroups-list">
           ${subgroupsHtml || '<div style="padding:8px 12px; font-size:0.75rem; color:var(--text-muted);">Belum ada sub-grup tertaut.</div>'}
@@ -584,10 +610,11 @@ function renderCommunityList(communities) {
       </div>
     `;
   }).join('');
+
+  container.innerHTML = filterPills + cardsHtml;
 }
 
-async function selectSubgroupChat(groupId) {
-  // Check if group is already in state.groups
+async function selectSubgroupChat(groupId, communityId = null) {
   let group = state.groups.find((g) => g.id === groupId);
   if (!group) {
     const allGroups = await api.getMyGroups();
@@ -595,20 +622,230 @@ async function selectSubgroupChat(groupId) {
     group = state.groups.find((g) => g.id === groupId);
   }
   if (group) {
-    selectGroupChat(groupId);
+    selectGroupChat(groupId, communityId);
   } else {
-    // If user is not yet member of this sub-group, show join prompt
-    if (confirm('Anda belum terdaftar di sub-grup ini. Bergabung sekarang?')) {
-      try {
-        await api.joinGroup(groupId);
-        showToast('Bergabung', 'Berhasil bergabung ke sub-grup!', 'success', '🎉');
-        const allGroups = await api.getMyGroups();
-        state.groups = allGroups || [];
-        selectGroupChat(groupId);
-      } catch (e) {
-        showToast('Gagal Bergabung', e.message, 'error', '❌');
+    if (confirm('Anda belum terdaftar di sub-grup ini. Kirim permintaan bergabung?')) {
+      handleRequestJoinSubgroup(groupId, communityId);
+    }
+  }
+}
+
+// ==========================================================================
+// Community Hub Management (FR-COM-01 s/d FR-COM-05)
+// ==========================================================================
+async function selectCommunityHub(communityId) {
+  try {
+    // Hide empty state and active chat window, show community hub window
+    document.getElementById('chat-empty-state').classList.add('hidden');
+    document.getElementById('chat-active-window').classList.add('hidden');
+    const hub = document.getElementById('community-active-window');
+    hub.classList.remove('hidden');
+
+    state.activeChat = null;
+    state.activeCommunity = { id: communityId };
+
+    // Fetch full community details
+    const comm = await api.getCommunityDetails(communityId);
+    state.activeCommunity = comm;
+
+    // Render Hub Header
+    const avatarEl = document.getElementById('community-hub-avatar');
+    const nameEl = document.getElementById('community-hub-name');
+    const descEl = document.getElementById('community-hub-desc');
+    const statsEl = document.getElementById('community-hub-stats');
+    const actionsEl = document.getElementById('community-hub-actions');
+
+    if (avatarEl) avatarEl.textContent = (comm.name || 'C').charAt(0).toUpperCase();
+    if (nameEl) nameEl.textContent = comm.name;
+    if (descEl) descEl.textContent = comm.description || 'Komunitas obrolan untuk berdiskusi dan berbagi informasi.';
+
+    const creatorName = comm.creator?.biodata
+      ? `${comm.creator.biodata.first_name} ${comm.creator.biodata.last_name}`
+      : (comm.creator?.email || 'Admin');
+
+    if (statsEl) {
+      statsEl.innerHTML = `
+        <span>👥 ${comm.members?.length || 0} Anggota</span> • 
+        <span>📂 ${(comm.groups || []).length} Sub-grup</span> • 
+        <span>Dibuat oleh: <strong>${escapeHtml(creatorName)}</strong></span>
+      `;
+    }
+
+    if (actionsEl) {
+      if (!comm.isMember) {
+        actionsEl.innerHTML = `
+          <button class="btn btn-primary" onclick="handleJoinCommunity(${comm.id})">
+            <span>➕ Gabung Komunitas</span>
+          </button>
+        `;
+      } else {
+        let adminBtns = '';
+        if (comm.isAdmin) {
+          adminBtns = `
+            <button class="btn btn-outline btn-sm" onclick="openLinkGroupModal(${comm.id})" title="Tautkan grup yang Anda kelola">
+              <span>🔗 Tautkan Grup</span>
+            </button>
+            <button class="btn btn-outline btn-sm" onclick="openCommunityMembersModal(${comm.id})" title="Kelola anggota komunitas">
+              <span>👥 Kelola Anggota</span>
+            </button>
+          `;
+        }
+        actionsEl.innerHTML = `
+          <span class="badge-role badge-member" style="padding:6px 12px; font-size:0.8rem;">✓ Anggota Komunitas</span>
+          ${adminBtns}
+        `;
       }
     }
+
+    // Render Announcement Card (FR-COM-02)
+    const annGroupObj = (comm.groups || []).find((cg) => cg.is_announcement || cg.group?.is_announcement);
+    const annNameEl = document.getElementById('announcement-group-name');
+    const annDescEl = document.getElementById('announcement-group-desc');
+    const btnOpenAnn = document.getElementById('btn-open-announcement');
+
+    if (annGroupObj) {
+      if (annNameEl) annNameEl.textContent = annGroupObj.group?.name || 'Saluran Pengumuman';
+      if (annDescEl) annDescEl.textContent = annGroupObj.group?.description || 'Ruang obrolan resmi. Hanya pengurus komunitas yang dapat mengirim pengumuman.';
+      if (btnOpenAnn) {
+        btnOpenAnn.onclick = () => selectGroupChat(annGroupObj.group_id, comm.id);
+      }
+    }
+
+    // Render Sub-groups Grid (FR-COM-04)
+    const subgroupsContainer = document.getElementById('community-subgroups-grid');
+    const countBadge = document.getElementById('community-subgroups-count');
+    const regularGroups = (comm.groups || []).filter((cg) => !cg.is_announcement && !cg.group?.is_announcement);
+
+    if (countBadge) {
+      countBadge.textContent = `${regularGroups.length} Sub-grup`;
+    }
+
+    if (subgroupsContainer) {
+      if (regularGroups.length === 0) {
+        subgroupsContainer.innerHTML = `
+          <div class="empty-state" style="grid-column: 1 / -1; padding: 28px 16px;">
+            <div style="font-size:2.2rem; margin-bottom:10px;">📂</div>
+            <h4 style="margin:0 0 6px 0;">Belum ada sub-grup obrolan</h4>
+            <p style="margin:0; font-size:0.85rem; color:var(--text-secondary);">
+              Komunitas ini belum memiliki sub-grup obrolan tambahan.
+            </p>
+            ${comm.isAdmin ? `<button class="btn btn-outline btn-sm" style="margin-top:14px;" onclick="openLinkGroupModal(${comm.id})">🔗 Tautkan Grup Sekarang</button>` : ''}
+          </div>
+        `;
+      } else {
+        subgroupsContainer.innerHTML = regularGroups.map((cg) => {
+          const g = cg.group;
+          const isMemberOfSubgroup = g.members && g.members.length > 0;
+          return `
+            <div class="subgroup-card">
+              <div class="subgroup-card-top">
+                <div class="subgroup-card-header">
+                  <h4 class="subgroup-card-title">💬 ${escapeHtml(g.name)}</h4>
+                  ${isMemberOfSubgroup ? '<span class="badge-role badge-member" style="font-size:0.68rem; padding:2px 6px;">✓ Terdaftar</span>' : ''}
+                </div>
+                <p class="subgroup-card-desc">${escapeHtml(g.description || 'Sub-grup diskusi obrolan.')}</p>
+              </div>
+              <div class="subgroup-card-footer">
+                <span style="font-size:0.75rem; color:var(--text-muted);">👥 ${g._count?.members || 0} Anggota</span>
+                ${isMemberOfSubgroup 
+                  ? `<button class="btn btn-primary btn-sm" onclick="selectGroupChat(${g.id}, ${comm.id})">💬 Masuk Obrolan</button>` 
+                  : `<button class="btn btn-outline btn-sm" onclick="handleRequestJoinSubgroup(${g.id}, ${comm.id})">📩 Minta Gabung</button>`
+                }
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+  } catch (err) {
+    showToast('Gagal Memuat Komunitas', err.message, 'error', '❌');
+  }
+}
+
+async function handleJoinCommunity(communityId) {
+  try {
+    const res = await api.joinCommunity(communityId);
+    showToast('Bergabung Komunitas', res.message || 'Berhasil bergabung ke komunitas!', 'success', '🎉');
+    await loadConversations();
+    selectCommunityHub(communityId);
+  } catch (err) {
+    showToast('Gagal Bergabung', err.message, 'error', '❌');
+  }
+}
+
+async function handleRequestJoinSubgroup(groupId, communityId) {
+  try {
+    const res = await api.joinGroup(groupId);
+    showToast('Permintaan Bergabung', res.message || 'Permintaan bergabung ke sub-grup telah dikirim.', 'info', '📩');
+    await loadConversations();
+    if (communityId) selectCommunityHub(communityId);
+  } catch (err) {
+    showToast('Gagal Bergabung', err.message, 'error', '❌');
+  }
+}
+
+async function openCommunityMembersModal(communityId) {
+  try {
+    const comm = await api.getCommunityDetails(communityId);
+    openModal('modal-community-members');
+    const listContainer = document.getElementById('community-members-list');
+    const titleEl = document.getElementById('community-members-modal-title');
+    if (titleEl) titleEl.textContent = `👥 Anggota Komunitas: ${escapeHtml(comm.name)}`;
+
+    const currentUserId = state.currentUser?.id;
+
+    listContainer.innerHTML = (comm.members || []).map((m) => {
+      const u = m.user;
+      const name = u?.biodata ? `${u.biodata.first_name} ${u.biodata.last_name}` : (u?.email || 'Pengguna');
+      const isSelf = m.user_id === currentUserId;
+      const isMemberOwner = m.role === 'COMMUNITY_OWNER';
+      const canRemove = (comm.isAdmin && !isMemberOwner && !isSelf);
+
+      let roleLabel = 'Anggota';
+      let roleClass = 'badge-member';
+      if (m.role === 'COMMUNITY_OWNER') {
+        roleLabel = 'Owner';
+        roleClass = 'badge-owner';
+      } else if (m.role === 'COMMUNITY_ADMIN') {
+        roleLabel = 'Admin';
+        roleClass = 'badge-admin';
+      }
+
+      return `
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:rgba(255,255,255,0.03); border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div class="conv-avatar user" style="width:34px; height:34px; font-size:0.9rem;">${(name.charAt(0) || 'U').toUpperCase()}</div>
+            <div>
+              <div style="font-size:0.85rem; font-weight:600; color:var(--text-primary);">${escapeHtml(name)} ${isSelf ? '<span style="font-size:0.75rem; color:var(--text-muted);">(Anda)</span>' : ''}</div>
+              <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(u?.email || '')}</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="badge-role ${roleClass}">${roleLabel}</span>
+            ${canRemove ? `
+              <button class="btn btn-outline btn-sm" style="color:#f87171; border-color:rgba(239,68,68,0.4); padding:3px 8px; font-size:0.72rem;" onclick="handleRemoveCommunityMember(${comm.id}, ${m.user_id}, '${escapeHtml(name)}')">
+                Keluarkan
+              </button>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    showToast('Gagal Memuat Anggota', err.message, 'error', '❌');
+  }
+}
+
+async function handleRemoveCommunityMember(communityId, targetUserId, userName) {
+  if (!confirm(`Keluarkan ${userName} dari komunitas dan seluruh sub-grupnya (FR-COM-05)?`)) return;
+  try {
+    const res = await api.removeCommunityMember(communityId, targetUserId);
+    showToast('Anggota Dikeluarkan', res.message || 'Anggota berhasil dikeluarkan dari komunitas dan seluruh sub-grupnya.', 'info', '👋');
+    openCommunityMembersModal(communityId);
+    selectCommunityHub(communityId);
+    loadConversations();
+  } catch (err) {
+    showToast('Gagal Mengeluarkan', err.message, 'error', '❌');
   }
 }
 
@@ -631,11 +868,42 @@ function filterConversations(query) {
 // ==========================================================================
 // Active Chat Window Management
 // ==========================================================================
-async function selectGroupChat(groupId) {
-  const group = state.groups.find((g) => g.id === groupId);
-  if (!group) return;
+async function selectGroupChat(groupId, communityId = null) {
+  let group = state.groups.find((g) => g.id === groupId);
+  if (!group) {
+    const allGroups = await api.getMyGroups();
+    state.groups = allGroups || [];
+    group = state.groups.find((g) => g.id === groupId);
+  }
+  if (!group) {
+    try {
+      group = await api.getGroupDetails(groupId);
+    } catch (e) {
+      showToast('Gagal Membuka Grup', 'Anda tidak memiliki akses ke sub-grup ini.', 'error', '❌');
+      return;
+    }
+  }
 
   state.activeChat = { type: 'group', id: groupId, data: group };
+
+  // Hide community hub window if open
+  document.getElementById('community-active-window')?.classList.add('hidden');
+
+  // Handle Community Back Button & Badge
+  const btnBackCommunity = document.getElementById('btn-back-to-community');
+  const communityBadge = document.getElementById('active-chat-community-badge');
+  const linkedCommunityId = communityId || state.activeCommunity?.id;
+
+  if (linkedCommunityId) {
+    if (btnBackCommunity) {
+      btnBackCommunity.classList.remove('hidden');
+      btnBackCommunity.onclick = () => selectCommunityHub(linkedCommunityId);
+    }
+    if (communityBadge) communityBadge.classList.remove('hidden');
+  } else {
+    if (btnBackCommunity) btnBackCommunity.classList.add('hidden');
+    if (communityBadge) communityBadge.classList.add('hidden');
+  }
 
   // Update sidebar active class
   renderGroupList(state.groups);
@@ -711,6 +979,11 @@ async function selectPCChat(userId) {
   }
 
   state.activeChat = { type: 'pc', id: userId, data: contact };
+
+  // Hide community hub window
+  document.getElementById('community-active-window')?.classList.add('hidden');
+  document.getElementById('btn-back-to-community')?.classList.add('hidden');
+  document.getElementById('active-chat-community-badge')?.classList.add('hidden');
 
   // Reset announcement banner and restore input
   const banner = document.getElementById('announcement-readonly-banner');
@@ -1425,10 +1698,16 @@ function renderNotifications() {
     if (n.type === 'ADDED_TO_GROUP') icon = '🎉';
     if (n.type === 'REMOVED_FROM_GROUP') icon = '⚠️';
     if (n.type === 'USER_JOINED_GROUP') icon = '👥';
+    if (n.type?.includes('COMMUNITY')) icon = '🌐';
+    if (n.type?.includes('CALL')) icon = '📞';
 
     const timeStr = n.created_at
       ? new Date(n.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
       : '';
+
+    const statusBadge = !n.is_read
+      ? '<span class="notif-status-badge badge-unread">● Belum Dibaca</span>'
+      : '<span class="notif-status-badge badge-read">✓ Telah Dibaca</span>';
 
     return `
       <div class="notification-item ${!n.is_read ? 'unread' : ''}" onclick="markNotificationRead(${n.id})">
@@ -1436,7 +1715,10 @@ function renderNotifications() {
         <div class="notification-content">
           <div class="notification-title">${escapeHtml(n.title)}</div>
           <div class="notification-message">${escapeHtml(n.message)}</div>
-          <div class="notification-time">${timeStr}</div>
+          <div class="notification-meta">
+            <span class="notification-time">${timeStr}</span>
+            ${statusBadge}
+          </div>
         </div>
       </div>
     `;
@@ -1711,7 +1993,8 @@ async function handleLinkGroupSubmit(e) {
     const res = await api.linkGroupToCommunity(activeCommunityIdForLink, groupId);
     closeModal('modal-link-group');
     showToast('Grup Ditautkan', res.message, 'success', '🔗');
-    loadConversations();
+    await loadConversations();
+    selectCommunityHub(activeCommunityIdForLink);
   } catch (err) {
     showToast('Gagal Menautkan', err.message, 'error', '❌');
   }
@@ -1729,12 +2012,7 @@ async function handleCreateCommunitySubmit(e) {
     document.getElementById('form-create-community').reset();
     showToast('Komunitas Dibuat', `Komunitas "${name}" berhasil dibuat dengan sub-grup Pengumuman default!`, 'success', '🎉');
     await loadConversations();
-
-    // Auto-select announcement group if exists
-    const announcementGroup = (newCommunity.groups || []).find((g) => g.is_announcement);
-    if (announcementGroup) {
-      selectGroupChat(announcementGroup.group_id);
-    }
+    selectCommunityHub(newCommunity.id);
   } catch (err) {
     showToast('Gagal Membuat Komunitas', err.message, 'error', '❌');
   }
