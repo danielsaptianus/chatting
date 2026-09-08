@@ -190,11 +190,13 @@ model GroupMessage {
 }
 
 model DirectMessage {
-  id          Int      @id @default(autoincrement())
+  id          Int       @id @default(autoincrement())
   sender_id   Int
   receiver_id Int
   content     String
-  created_at  DateTime @default(now())
+  is_read     Boolean   @default(false)
+  read_at     DateTime?
+  created_at  DateTime  @default(now())
 
   sender   User @relation("SentDirectMessages", fields: [sender_id], references: [id], onDelete: Cascade)
   receiver User @relation("ReceivedDirectMessages", fields: [receiver_id], references: [id], onDelete: Cascade)

@@ -867,11 +867,40 @@ select:focus {
   word-break: break-word;
 }
 
+.bubble-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 4px;
+}
 .bubble-time {
   font-size: 0.65rem;
-  color: rgba(255, 255, 255, 0.5);
-  align-self: flex-end;
-  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.bubble-status {
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  letter-spacing: -2.5px;
+  margin-left: 3px;
+  user-select: none;
+}
+.bubble-status.status-sent {
+  color: #94a3b8; /* Ceklis 1 abu-abu (terkirim) */
+}
+.bubble-status.status-delivered {
+  color: #94a3b8; /* Ceklis 2 abu-abu (tersampaikan) */
+}
+.bubble-status.status-read {
+  color: #38bdf8; /* Ceklis 2 biru ala WhatsApp (dibaca) */
+}
+
+.subgroup-item.active {
+  background: rgba(99, 102, 241, 0.18);
+  border-left: 3px solid var(--primary);
 }
 
 /* Chat Footer (Input) */

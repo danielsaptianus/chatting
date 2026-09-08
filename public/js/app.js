@@ -189,6 +189,10 @@ function setupEventListeners() {
   const notifDropdown = document.getElementById('notification-dropdown');
   bellBtn.addEventListener('click', (e) => {
     e.stopPropagation();
+    const isHidden = notifDropdown.classList.contains('hidden');
+    if (isHidden) {
+      loadNotifications();
+    }
     notifDropdown.classList.toggle('hidden');
   });
 
@@ -296,6 +300,9 @@ function setupSocketListeners() {
 
     if (isCurrentActive) {
       appendMessageBubble(message, message.sender_id === state.currentUser?.id);
+      if (message.sender_id !== state.currentUser?.id) {
+        api.markDirectMessagesRead(message.sender_id).catch(() => {});
+      }
     } else {
       if (message.sender_id !== state.currentUser?.id) {
         const senderName = message.sender?.biodata
@@ -304,6 +311,17 @@ function setupSocketListeners() {
         showToast('Pesan Pribadi (PC)', `${senderName}: ${message.content}`, 'info', '✉️');
         loadConversations();
       }
+    }
+  });
+
+  // Real-time Read Receipt Event (Ceklis Biru ala WhatsApp)
+  socketClient.on('messages_read', (data) => {
+    if (state.activeChat?.type === 'pc' && state.activeChat.id === data.readerId) {
+      document.querySelectorAll('.message-bubble.outgoing .bubble-status').forEach((el) => {
+        el.className = 'bubble-status status-read';
+        el.title = 'Telah dibaca';
+        el.textContent = '✓✓';
+      });
     }
   });
 
@@ -573,12 +591,14 @@ function renderCommunityList(communities) {
     const isOwnerOrAdmin = comm.members?.some(
       (m) => m.user_id === state.currentUser?.id && (m.role === 'COMMUNITY_OWNER' || m.role === 'COMMUNITY_ADMIN')
     );
+    const isCommActive = state.activeCommunity?.id === comm.id && !state.activeChat;
 
     const subgroupsHtml = (comm.groups || []).map((cg) => {
       const g = cg.group;
       const isAnnounce = cg.is_announcement || g.is_announcement;
+      const isSubgroupActive = state.activeChat?.type === 'group' && state.activeChat.id === g.id;
       return `
-        <div class="subgroup-item" onclick="event.stopPropagation(); selectSubgroupChat(${g.id}, ${comm.id})">
+        <div class="subgroup-item ${isSubgroupActive ? 'active' : ''}" onclick="event.stopPropagation(); selectSubgroupChat(${g.id}, ${comm.id})">
           <span class="subgroup-name">
             ${isAnnounce ? '📢' : '💬'} ${escapeHtml(g.name)}
             ${isAnnounce ? '<span class="badge-announcement">Pengumuman</span>' : ''}
@@ -589,7 +609,7 @@ function renderCommunityList(communities) {
     }).join('');
 
     return `
-      <div class="community-item">
+      <div class="community-item ${isCommActive ? 'active' : ''}">
         <div class="community-header-item" style="cursor:pointer;" onclick="selectCommunityHub(${comm.id})">
           <div class="community-avatar">${(comm.name || 'C').charAt(0).toUpperCase()}</div>
           <div class="community-info">
@@ -643,6 +663,25 @@ async function selectCommunityHub(communityId) {
 
     state.activeChat = null;
     state.activeCommunity = { id: communityId };
+
+    // Ensure activeTab is communities and UI tab button is active
+    if (state.activeTab !== 'communities') {
+      state.activeTab = 'communities';
+      document.getElementById('tab-groups')?.classList.remove('active');
+      document.getElementById('tab-pc')?.classList.remove('active');
+      document.getElementById('tab-communities')?.classList.add('active');
+      const btnNewChatLabel = document.getElementById('btn-new-chat-label');
+      if (btnNewChatLabel) btnNewChatLabel.textContent = '+ Komunitas';
+      const btnJoinByLink = document.getElementById('btn-join-by-link');
+      if (btnJoinByLink) btnJoinByLink.style.display = 'none';
+    }
+
+    // Always re-render community sidebar so it never shows group list
+    if (state.communities && state.communities.length > 0) {
+      renderCommunityList(state.communities);
+    } else {
+      loadConversations();
+    }
 
     // Fetch full community details
     const comm = await api.getCommunityDetails(communityId);
@@ -905,8 +944,12 @@ async function selectGroupChat(groupId, communityId = null) {
     if (communityBadge) communityBadge.classList.add('hidden');
   }
 
-  // Update sidebar active class
-  renderGroupList(state.groups);
+  // Update sidebar active class: preserve community view if opened from community context
+  if (linkedCommunityId || state.activeTab === 'communities') {
+    renderCommunityList(state.communities);
+  } else {
+    renderGroupList(state.groups);
+  }
 
   // Close mobile sidebar if open
   document.getElementById('app-sidebar').classList.remove('open');
@@ -1018,6 +1061,7 @@ async function selectPCChat(userId) {
 
   renderUserInfoDrawer(contact);
   await loadChatMessages();
+  api.markDirectMessagesRead(userId).catch(() => {});
 }
 
 async function loadChatMessages() {
@@ -1069,11 +1113,29 @@ function appendMessageBubble(message, isOutgoing) {
     senderHeader = `<div class="bubble-sender">${escapeHtml(senderName)}</div>`;
   }
 
+  let statusCheckmark = '';
+  if (isOutgoing) {
+    if (state.activeChat?.type === 'pc') {
+      if (message.is_read) {
+        statusCheckmark = '<span class="bubble-status status-read" title="Telah dibaca">✓✓</span>';
+      } else if (message.is_sent_only) {
+        statusCheckmark = '<span class="bubble-status status-sent" title="Terkirim ke server">✓</span>';
+      } else {
+        statusCheckmark = '<span class="bubble-status status-delivered" title="Tersampaikan">✓✓</span>';
+      }
+    } else {
+      statusCheckmark = '<span class="bubble-status status-delivered" title="Terkirim ke grup">✓✓</span>';
+    }
+  }
+
   bubble.innerHTML = `
     ${senderHeader}
     <div class="bubble-content">
       ${escapeHtml(message.content)}
-      <div class="bubble-time">${timeStr}</div>
+      <div class="bubble-meta">
+        <span class="bubble-time">${timeStr}</span>
+        ${statusCheckmark}
+      </div>
     </div>
   `;
 

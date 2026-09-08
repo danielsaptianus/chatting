@@ -248,6 +248,12 @@ const api = {
     return this.request(`/chat/pc/${userId}/messages`);
   },
 
+  async markDirectMessagesRead(userId) {
+    return this.request(`/chat/pc/${userId}/read`, {
+      method: 'PATCH',
+    });
+  },
+
   async getConversations() {
     return this.request('/chat/pc/conversations');
   },

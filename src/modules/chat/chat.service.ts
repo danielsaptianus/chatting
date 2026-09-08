@@ -670,6 +670,34 @@ export class ChatService {
   }
 
   async getDirectMessages(userId: number, otherUserId: number) {
+    // When userId opens chat with otherUserId, mark all unread messages from otherUserId as read
+    const unreadCount = await this.prisma.directMessage.count({
+      where: {
+        sender_id: otherUserId,
+        receiver_id: userId,
+        is_read: false,
+      },
+    });
+
+    if (unreadCount > 0) {
+      await this.prisma.directMessage.updateMany({
+        where: {
+          sender_id: otherUserId,
+          receiver_id: userId,
+          is_read: false,
+        },
+        data: {
+          is_read: true,
+          read_at: new Date(),
+        },
+      });
+
+      // Real-time notify the sender that their messages have been read (turning checkmark to blue!)
+      this.gateway.sendToUser(otherUserId, 'messages_read', {
+        readerId: userId,
+      });
+    }
+
     return this.prisma.directMessage.findMany({
       where: {
         OR: [
@@ -683,6 +711,26 @@ export class ChatService {
       },
       orderBy: { created_at: 'asc' },
     });
+  }
+
+  async markDirectMessagesRead(userId: number, otherUserId: number) {
+    await this.prisma.directMessage.updateMany({
+      where: {
+        sender_id: otherUserId,
+        receiver_id: userId,
+        is_read: false,
+      },
+      data: {
+        is_read: true,
+        read_at: new Date(),
+      },
+    });
+
+    this.gateway.sendToUser(otherUserId, 'messages_read', {
+      readerId: userId,
+    });
+
+    return { success: true };
   }
 
   async getConversations(userId: number) {

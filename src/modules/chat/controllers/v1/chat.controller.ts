@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   Param,
@@ -197,6 +198,15 @@ export class ChatController {
     @Param('userId', ParseIntPipe) otherUserId: number,
   ) {
     return this.chatService.getDirectMessages(userId, otherUserId);
+  }
+
+  @Patch('pc/:userId/read')
+  @ApiOperation({ summary: 'Mark all direct messages from a user as read' })
+  async markDirectMessagesRead(
+    @GetUser('userId') userId: number,
+    @Param('userId', ParseIntPipe) otherUserId: number,
+  ) {
+    return this.chatService.markDirectMessagesRead(userId, otherUserId);
   }
 
   // ==========================================
