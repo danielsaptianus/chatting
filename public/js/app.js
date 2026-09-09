@@ -204,6 +204,34 @@ function setupEventListeners() {
 
   document.getElementById('btn-mark-all-read').addEventListener('click', handleMarkAllNotificationsRead);
 
+  // My Profile Modal (FR-BIO-01, FR-BIO-02, FR-BIO-03)
+  const profilePill = document.getElementById('user-profile-pill');
+  if (profilePill) {
+    profilePill.addEventListener('click', () => openMyProfileModal());
+  }
+  const btnOpenProfile = document.getElementById('btn-open-my-profile');
+  if (btnOpenProfile) {
+    btnOpenProfile.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openMyProfileModal();
+    });
+  }
+  const formMyProfile = document.getElementById('form-my-profile');
+  if (formMyProfile) {
+    formMyProfile.addEventListener('submit', handleSaveMyProfile);
+  }
+  const inputAvatarFile = document.getElementById('input-avatar-file');
+  if (inputAvatarFile) {
+    inputAvatarFile.addEventListener('change', handleAvatarFileChange);
+  }
+  const bioInput = document.getElementById('my-profile-bio');
+  if (bioInput) {
+    bioInput.addEventListener('input', (e) => {
+      const counter = document.getElementById('bio-char-count');
+      if (counter) counter.textContent = `${e.target.value.length}/150`;
+    });
+  }
+
   // Admin Management Modal
   const btnAdmin = document.getElementById('btn-open-admin');
   btnAdmin.addEventListener('click', () => {
@@ -216,7 +244,7 @@ function setupEventListeners() {
   });
 
   document.getElementById('btn-admin-register-user').addEventListener('click', () => {
-    openModal('modal-register-user');
+    openRegisterUserModal();
   });
 
   document.getElementById('form-register-user').addEventListener('submit', handleAdminRegisterUser);
@@ -346,6 +374,12 @@ function setupSocketListeners() {
     webrtcManager.endCall(false);
   });
 
+  // BR-CALL-01: 30 seconds ring timeout handler
+  socketClient.on('call:timeout', (data) => {
+    showToast('Waktu Panggilan Habis (30s)', data?.message || 'Panggilan tidak dijawab dalam 30 detik.', 'warning', '⏱️');
+    webrtcManager.endCall(false);
+  });
+
   socketClient.on('call:signal', (data) => {
     webrtcManager.handleSignal(data.senderId, data.signal);
   });
@@ -440,14 +474,24 @@ function renderCurrentUser() {
   const lastName = user.biodata?.last_name || '';
   const role = user.biodata?.role || 'USER';
 
-  document.getElementById('current-user-avatar').textContent = firstName.charAt(0).toUpperCase();
+  const avatarEl = document.getElementById('current-user-avatar');
+  if (user.biodata?.avatar_url) {
+    avatarEl.innerHTML = `<img src="${user.biodata.avatar_url}" alt="Avatar" style="width:100%; height:100%; object-fit:cover; border-radius:50%;">`;
+    avatarEl.style.padding = '0';
+  } else {
+    avatarEl.textContent = firstName.charAt(0).toUpperCase();
+    avatarEl.style.padding = '';
+  }
+
   document.getElementById('current-user-name').textContent = `${firstName} ${lastName}`.trim();
   document.getElementById('current-user-role').textContent = role;
 
-  // Show Admin Panel Button if ADMIN
+  // Show Admin Panel Button if SUPER_ADMIN or ADMIN (FR-ROLE-01 - FR-ROLE-05)
   const adminBtn = document.getElementById('btn-open-admin');
-  if (role === 'ADMIN') {
+  const isPrivileged = role === 'SUPER_ADMIN' || role === 'ADMIN';
+  if (isPrivileged) {
     adminBtn.classList.remove('hidden');
+    adminBtn.title = role === 'SUPER_ADMIN' ? 'Manajemen Pengguna (Super Admin)' : 'Manajemen Pengguna (Admin Grup)';
   } else {
     adminBtn.classList.add('hidden');
   }
@@ -545,10 +589,13 @@ function renderPCList(contacts) {
     const name = u.biodata ? `${u.biodata.first_name} ${u.biodata.last_name}` : u.email;
     const initial = name.charAt(0).toUpperCase();
     const roleBadge = u.biodata?.role ? `[${u.biodata.role}]` : '';
+    const avatarHtml = u.biodata?.avatar_url
+      ? `<img src="${u.biodata.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`
+      : initial;
 
     return `
       <div class="conv-item ${isActive ? 'active' : ''}" onclick="selectPCChat(${u.id})">
-        <div class="conv-avatar user">${initial}</div>
+        <div class="conv-avatar user" style="${u.biodata?.avatar_url ? 'padding:0;overflow:hidden;' : ''}">${avatarHtml}</div>
         <div class="conv-meta">
           <div class="conv-top">
             <span class="conv-name">${escapeHtml(name)}</span>
@@ -961,9 +1008,16 @@ async function selectGroupChat(groupId, communityId = null) {
   document.getElementById('chat-empty-state').classList.add('hidden');
   document.getElementById('chat-active-window').classList.remove('hidden');
 
-  document.getElementById('active-chat-avatar').textContent = (group.name || 'G').charAt(0).toUpperCase();
-  document.getElementById('active-chat-avatar').className = 'chat-avatar';
-  document.getElementById('active-chat-title').textContent = group.name;
+  const groupAvatarEl = document.getElementById('active-chat-avatar');
+  groupAvatarEl.textContent = (group.name || 'G').charAt(0).toUpperCase();
+  groupAvatarEl.className = 'chat-avatar';
+  groupAvatarEl.onclick = null;
+  groupAvatarEl.title = '';
+  
+  const groupTitleEl = document.getElementById('active-chat-title');
+  groupTitleEl.textContent = group.name;
+  groupTitleEl.onclick = null;
+  groupTitleEl.title = '';
   document.getElementById('active-chat-subtitle').textContent = `${group.members?.length || 0} Anggota`;
 
   const currentMember = (group.members || []).find((m) => m.user_id === state.currentUser?.id);
@@ -1048,15 +1102,29 @@ async function selectPCChat(userId) {
   document.getElementById('chat-active-window').classList.remove('hidden');
 
   const name = contact.biodata ? `${contact.biodata.first_name} ${contact.biodata.last_name}` : contact.email;
-  document.getElementById('active-chat-avatar').textContent = name.charAt(0).toUpperCase();
-  document.getElementById('active-chat-avatar').className = 'chat-avatar user';
-  document.getElementById('active-chat-title').textContent = name;
+  const avatarEl = document.getElementById('active-chat-avatar');
+  if (contact.biodata?.avatar_url) {
+    avatarEl.innerHTML = `<img src="${contact.biodata.avatar_url}" alt="${escapeHtml(name)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+  } else {
+    avatarEl.textContent = name.charAt(0).toUpperCase();
+  }
+  avatarEl.className = 'chat-avatar user';
+  avatarEl.style.cursor = 'pointer';
+  avatarEl.title = 'Klik untuk melihat profil publik';
+  avatarEl.onclick = () => showPublicProfile(userId);
+
+  const titleEl = document.getElementById('active-chat-title');
+  titleEl.textContent = name;
+  titleEl.style.cursor = 'pointer';
+  titleEl.title = 'Klik untuk melihat profil publik';
+  titleEl.onclick = () => showPublicProfile(userId);
+
   document.getElementById('active-chat-subtitle').textContent = contact.email;
 
   document.getElementById('chat-header-actions').innerHTML = `
     <button class="btn btn-outline btn-sm" onclick="webrtcManager.startDirectCall(${userId}, '${escapeHtml(name)}')" title="Panggilan Suara Pribadi">📞 Panggilan</button>
     <button class="btn btn-outline btn-sm" onclick="openExportModal('pc', ${userId})" title="Unduh Arsip Chat">📥 Ekspor</button>
-    <button class="btn btn-outline btn-sm" onclick="toggleInfoDrawer()">ℹ️ Profil</button>
+    <button class="btn btn-outline btn-sm" onclick="showPublicProfile(${userId})" title="Profil Publik">ℹ️ Profil</button>
   `;
 
   renderUserInfoDrawer(contact);
@@ -1110,7 +1178,7 @@ function appendMessageBubble(message, isOutgoing) {
     const senderName = message.sender?.biodata
       ? `${message.sender.biodata.first_name} ${message.sender.biodata.last_name}`
       : message.sender?.email || 'Pengguna';
-    senderHeader = `<div class="bubble-sender">${escapeHtml(senderName)}</div>`;
+    senderHeader = `<div class="bubble-sender" style="cursor: pointer; text-decoration: underline;" onclick="showPublicProfile(${message.sender_id})" title="Lihat Profil">${escapeHtml(senderName)}</div>`;
   }
 
   let statusCheckmark = '';
@@ -1811,18 +1879,233 @@ async function handleMarkAllNotificationsRead() {
 // ==========================================================================
 // Admin Users Management
 // ==========================================================================
+// ==========================================================================
+// User Profile & Avatar Management (FR-BIO-01, FR-BIO-02, FR-BIO-03, FR-BIO-04)
+// ==========================================================================
+async function openMyProfileModal() {
+  try {
+    const user = await api.getMe();
+    state.currentUser = user;
+    api.setUser(user);
+    renderCurrentUser();
+
+    const bio = user.biodata?.bio || '';
+    document.getElementById('my-profile-firstname').value = user.biodata?.first_name || '';
+    document.getElementById('my-profile-lastname').value = user.biodata?.last_name || '';
+    document.getElementById('my-profile-phone').value = user.biodata?.phone || '';
+    document.getElementById('my-profile-bio').value = bio;
+    document.getElementById('bio-char-count').textContent = `${bio.length}/150`;
+
+    const role = user.biodata?.role || 'USER';
+    document.getElementById('my-profile-role-display').textContent = role;
+
+    const groupDisplay = document.getElementById('my-profile-managed-group-display');
+    if (user.managed_group) {
+      groupDisplay.classList.remove('hidden');
+      document.getElementById('my-profile-group-name').textContent = user.managed_group.name;
+    } else {
+      groupDisplay.classList.add('hidden');
+    }
+
+    // Avatar preview
+    const imgPreview = document.getElementById('my-profile-avatar-img');
+    const fallbackPreview = document.getElementById('my-profile-avatar-fallback');
+    const btnDelete = document.getElementById('btn-delete-avatar');
+
+    if (user.biodata?.avatar_url) {
+      imgPreview.src = user.biodata.avatar_url;
+      imgPreview.classList.remove('hidden');
+      fallbackPreview.classList.add('hidden');
+      btnDelete.classList.remove('hidden');
+    } else {
+      imgPreview.src = '';
+      imgPreview.classList.add('hidden');
+      fallbackPreview.textContent = (user.biodata?.first_name || 'U').charAt(0).toUpperCase();
+      fallbackPreview.classList.remove('hidden');
+      btnDelete.classList.add('hidden');
+    }
+
+    openModal('modal-my-profile');
+  } catch (err) {
+    showToast('Gagal Memuat Profil', err.message, 'error', '❌');
+  }
+}
+
+async function handleSaveMyProfile(e) {
+  e.preventDefault();
+  const firstName = document.getElementById('my-profile-firstname').value.trim();
+  const lastName = document.getElementById('my-profile-lastname').value.trim();
+  const phone = document.getElementById('my-profile-phone').value.trim();
+  const bio = document.getElementById('my-profile-bio').value.trim();
+
+  if (bio.length > 150) {
+    showToast('Bio Terlalu Panjang', 'Bio maksimal 150 karakter (FR-BIO-01).', 'error', '⚠️');
+    return;
+  }
+
+  const btnSave = document.getElementById('btn-save-my-profile');
+  const originalText = btnSave.innerHTML;
+  btnSave.disabled = true;
+  btnSave.innerHTML = 'Menyimpan... ⏳';
+
+  try {
+    const updated = await api.updateUser(state.currentUser.id, {
+      first_name: firstName,
+      last_name: lastName,
+      phone,
+      bio,
+    });
+
+    state.currentUser.biodata = updated.biodata;
+    api.setUser(state.currentUser);
+    renderCurrentUser();
+    closeModal('modal-my-profile');
+    showToast('Profil Disimpan', 'Data profil Anda berhasil diperbarui!', 'success', '💾');
+  } catch (err) {
+    showToast('Gagal Menyimpan Profil', err.message, 'error', '❌');
+  } finally {
+    btnSave.disabled = false;
+    btnSave.innerHTML = originalText;
+  }
+}
+
+async function handleAvatarFileChange(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  // Validate file size (2MB max, BR-AVATAR-01)
+  if (file.size > 2 * 1024 * 1024) {
+    showToast('Ukuran File Terlalu Besar', 'Batas maksimal foto profil adalah 2 MB (BR-AVATAR-01).', 'error', '⚠️');
+    e.target.value = '';
+    return;
+  }
+
+  // Validate extension
+  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+  if (!allowed.includes(file.type)) {
+    showToast('Format Tidak Didukung', 'Format yang didukung: .jpg, .jpeg, .png, .webp (BR-AVATAR-01).', 'error', '⚠️');
+    e.target.value = '';
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('avatar', file);
+
+  try {
+    const res = await api.uploadAvatar(formData);
+    state.currentUser.biodata.avatar_url = res.avatar_url;
+    api.setUser(state.currentUser);
+    renderCurrentUser();
+
+    const imgPreview = document.getElementById('my-profile-avatar-img');
+    const fallbackPreview = document.getElementById('my-profile-avatar-fallback');
+    const btnDelete = document.getElementById('btn-delete-avatar');
+
+    imgPreview.src = res.avatar_url;
+    imgPreview.classList.remove('hidden');
+    fallbackPreview.classList.add('hidden');
+    btnDelete.classList.remove('hidden');
+
+    showToast('Foto Profil Diunggah', res.message || 'Foto profil berhasil diperbarui.', 'success', '📷');
+  } catch (err) {
+    showToast('Gagal Unggah Avatar', err.message, 'error', '❌');
+  } finally {
+    e.target.value = '';
+  }
+}
+
+async function handleDeleteAvatar() {
+  if (!confirm('Apakah Anda yakin ingin menghapus foto profil dan kembali ke inisial nama standar (FR-BIO-03)?')) return;
+
+  try {
+    await api.deleteAvatar();
+    state.currentUser.biodata.avatar_url = null;
+    api.setUser(state.currentUser);
+    renderCurrentUser();
+
+    const imgPreview = document.getElementById('my-profile-avatar-img');
+    const fallbackPreview = document.getElementById('my-profile-avatar-fallback');
+    const btnDelete = document.getElementById('btn-delete-avatar');
+
+    imgPreview.src = '';
+    imgPreview.classList.add('hidden');
+    fallbackPreview.textContent = (state.currentUser?.biodata?.first_name || 'U').charAt(0).toUpperCase();
+    fallbackPreview.classList.remove('hidden');
+    btnDelete.classList.add('hidden');
+
+    showToast('Foto Dihapus', 'Foto profil dihapus dan dikembalikan ke inisial standar.', 'info', '👤');
+  } catch (err) {
+    showToast('Gagal Menghapus Foto', err.message, 'error', '❌');
+  }
+}
+
+// Public Profile Card (FR-BIO-04)
+async function showPublicProfile(userId) {
+  try {
+    const profile = await api.getPublicProfile(userId);
+
+    const imgEl = document.getElementById('public-profile-avatar-img');
+    const fallbackEl = document.getElementById('public-profile-avatar-fallback');
+    if (profile.avatar_url) {
+      imgEl.src = profile.avatar_url;
+      imgEl.classList.remove('hidden');
+      fallbackEl.classList.add('hidden');
+    } else {
+      imgEl.src = '';
+      imgEl.classList.add('hidden');
+      fallbackEl.textContent = (profile.first_name || 'U').charAt(0).toUpperCase();
+      fallbackEl.classList.remove('hidden');
+    }
+
+    const fullName = `${profile.first_name} ${profile.last_name}`.trim() || 'Pengguna';
+    document.getElementById('public-profile-name').textContent = fullName;
+    document.getElementById('public-profile-role-badge').textContent = profile.role;
+    document.getElementById('public-profile-bio').textContent = profile.bio || 'Tidak ada bio.';
+
+    const memberDate = profile.member_since ? new Date(profile.member_since).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }) : '-';
+    document.getElementById('public-profile-member-since').textContent = `Bergabung sejak: ${memberDate}`;
+
+    // Actions (Chat / Call)
+    const actionsDiv = document.getElementById('public-profile-actions');
+    const btnChat = document.getElementById('btn-public-profile-chat');
+    const btnCall = document.getElementById('btn-public-profile-call');
+
+    if (userId === state.currentUser?.id) {
+      actionsDiv.classList.add('hidden');
+    } else {
+      actionsDiv.classList.remove('hidden');
+      btnChat.onclick = () => {
+        closeModal('modal-public-profile');
+        selectPCChat(userId);
+      };
+      btnCall.onclick = () => {
+        closeModal('modal-public-profile');
+        webrtcManager.startDirectCall(userId, fullName);
+      };
+    }
+
+    openModal('modal-public-profile');
+  } catch (err) {
+    showToast('Gagal Memuat Profil Publik', err.message, 'error', '❌');
+  }
+}
+
+// ==========================================================================
+// Admin Users Management (BR-ROLE-01 - BR-ROLE-02, FR-ROLE-01 - FR-ROLE-05)
+// ==========================================================================
 async function loadAdminUsersList() {
   const tbody = document.getElementById('table-users-body');
-  tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Memuat data pengguna...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Memuat data pengguna...</td></tr>';
 
   const includeDeleted = document.getElementById('check-include-deleted').checked;
+  const myRole = state.currentUser?.biodata?.role || 'USER';
 
   try {
     const users = await api.getUsers(includeDeleted);
     state.usersCache = users;
 
     if (!users || users.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Tidak ada data pengguna.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Tidak ada data pengguna.</td></tr>';
       return;
     }
 
@@ -1836,22 +2119,107 @@ async function loadAdminUsersList() {
         ? '<span class="badge-status badge-active">Aktif</span>'
         : '<span class="badge-status badge-deleted">Nonaktif</span>';
 
+      const avatarHtml = u.biodata?.avatar_url
+        ? `<img src="${u.biodata.avatar_url}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:6px;">`
+        : `<span class="conv-avatar user" style="width:28px;height:28px;font-size:0.75rem;display:inline-flex;align-items:center;justify-content:center;margin-right:6px;">${(name.charAt(0) || 'U').toUpperCase()}</span>`;
+
+      const groupManagedName = u.managed_group ? escapeHtml(u.managed_group.name) : '-';
+
+      // Permission check for soft-delete
+      let canDelete = false;
+      if (!isDeleted && u.id !== state.currentUser?.id) {
+        if (myRole === 'SUPER_ADMIN') {
+          canDelete = true;
+        } else if (myRole === 'ADMIN' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') {
+          canDelete = true;
+        }
+      }
+
       return `
         <tr>
           <td>${u.id}</td>
-          <td><strong>${escapeHtml(name)}</strong></td>
+          <td>
+            <div style="display:flex; align-items:center; cursor:pointer;" onclick="showPublicProfile(${u.id})">
+              ${avatarHtml}
+              <strong>${escapeHtml(name)}</strong>
+            </div>
+          </td>
           <td>${escapeHtml(u.email)}</td>
           <td><span class="user-role-badge">${role}</span></td>
+          <td><small style="color:var(--text-secondary);">${groupManagedName}</small></td>
           <td>${statusBadge}</td>
           <td>
             <button class="btn btn-outline btn-sm" onclick="openEditUserModal(${u.id})">Edit</button>
-            ${!isDeleted ? `<button class="btn btn-danger btn-sm" onclick="handleSoftDeleteUser(${u.id})">Soft Delete</button>` : ''}
+            ${canDelete ? `<button class="btn btn-danger btn-sm" onclick="handleSoftDeleteUser(${u.id})">Soft Delete</button>` : ''}
           </td>
         </tr>
       `;
     }).join('');
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+async function openRegisterUserModal() {
+  const form = document.getElementById('form-register-user');
+  form.reset();
+
+  const myRole = state.currentUser?.biodata?.role || 'USER';
+  const roleSelect = document.getElementById('reg-role');
+  const adminNotice = document.getElementById('reg-admin-notice');
+  const managedGroupWrapper = document.getElementById('group-managed-select-wrapper');
+  const userGroupWrapper = document.getElementById('group-user-select-wrapper');
+
+  if (myRole === 'SUPER_ADMIN') {
+    // Super Admin can choose USER or ADMIN
+    roleSelect.disabled = false;
+    roleSelect.innerHTML = `
+      <option value="USER">USER (Pengguna Grup)</option>
+      <option value="ADMIN">ADMIN (Admin Grup)</option>
+    `;
+    adminNotice.classList.add('hidden');
+
+    // Populate group dropdowns
+    try {
+      const allGroups = await api.getAllGroups();
+      const optionsHtml = '<option value="">-- Pilih Grup --</option>' +
+        (allGroups || []).map((g) => `<option value="${g.id}">${escapeHtml(g.name)} (#${g.id})</option>`).join('');
+
+      document.getElementById('reg-managed-group').innerHTML = optionsHtml;
+      document.getElementById('reg-user-group').innerHTML = '<option value="">-- Tanpa Grup Langsung --</option>' +
+        (allGroups || []).map((g) => `<option value="${g.id}">${escapeHtml(g.name)} (#${g.id})</option>`).join('');
+    } catch {
+      // Fallback
+    }
+
+    handleRegRoleChange();
+  } else if (myRole === 'ADMIN') {
+    // Group Admin is locked to USER only (FR-ROLE-03)
+    roleSelect.innerHTML = `<option value="USER" selected>USER (Pengguna Grup)</option>`;
+    roleSelect.disabled = true;
+    adminNotice.classList.remove('hidden');
+    managedGroupWrapper.classList.add('hidden');
+    userGroupWrapper.classList.add('hidden');
+  }
+
+  openModal('modal-register-user');
+}
+
+function handleRegRoleChange() {
+  const role = document.getElementById('reg-role').value;
+  const myRole = state.currentUser?.biodata?.role || 'USER';
+
+  if (myRole === 'SUPER_ADMIN') {
+    const managedGroupWrapper = document.getElementById('group-managed-select-wrapper');
+    const userGroupWrapper = document.getElementById('group-user-select-wrapper');
+
+    if (role === 'ADMIN') {
+      managedGroupWrapper.classList.remove('hidden');
+      userGroupWrapper.classList.add('hidden');
+    } else {
+      managedGroupWrapper.classList.add('hidden');
+      userGroupWrapper.classList.remove('hidden');
+    }
   }
 }
 
@@ -1861,21 +2229,44 @@ async function handleAdminRegisterUser(e) {
   const lastName = document.getElementById('reg-lastname').value.trim();
   const email = document.getElementById('reg-email').value.trim();
   const password = document.getElementById('reg-password').value;
+  const phone = document.getElementById('reg-phone')?.value.trim() || undefined;
+  const bio = document.getElementById('reg-bio')?.value.trim() || undefined;
   const role = document.getElementById('reg-role').value;
 
-  try {
-    await api.createUserByAdmin({
-      first_name: firstName,
-      last_name: lastName,
-      email,
-      password,
-      role,
-    });
+  const myRole = state.currentUser?.biodata?.role || 'USER';
+  const payload = {
+    first_name: firstName,
+    last_name: lastName,
+    email,
+    password,
+    role,
+    phone,
+    bio,
+  };
 
+  if (myRole === 'SUPER_ADMIN') {
+    if (role === 'ADMIN') {
+      const managedGroupId = document.getElementById('reg-managed-group').value;
+      if (!managedGroupId) {
+        showToast('Validasi Gagal', 'Super Admin wajib menetapkan grup yang dikelola untuk akun Admin (BR-ROLE-01).', 'error', '⚠️');
+        return;
+      }
+      payload.managed_group_id = Number(managedGroupId);
+    } else if (role === 'USER') {
+      const groupId = document.getElementById('reg-user-group').value;
+      if (groupId) {
+        payload.group_id = Number(groupId);
+      }
+    }
+  }
+
+  try {
+    await api.createUserByAdmin(payload);
     closeModal('modal-register-user');
     document.getElementById('form-register-user').reset();
-    showToast('User Didaftarkan', `User "${email}" berhasil didaftarkan!`, 'success', '👤');
+    showToast('User Didaftarkan', `User "${email}" (${role}) berhasil didaftarkan!`, 'success', '👤');
     loadAdminUsersList();
+    loadConversations();
   } catch (err) {
     showToast('Gagal Mendaftarkan', err.message, 'error', '❌');
   }
@@ -1888,8 +2279,16 @@ function openEditUserModal(userId) {
   document.getElementById('edit-user-id').value = user.id;
   document.getElementById('edit-firstname').value = user.biodata?.first_name || '';
   document.getElementById('edit-lastname').value = user.biodata?.last_name || '';
+  document.getElementById('edit-phone').value = user.biodata?.phone || '';
+  document.getElementById('edit-bio').value = user.biodata?.bio || '';
   document.getElementById('edit-role').value = user.biodata?.role || 'USER';
   document.getElementById('edit-active').checked = user.biodata?.is_active !== false;
+
+  const myRole = state.currentUser?.biodata?.role || 'USER';
+  const roleWrapper = document.getElementById('edit-role-wrapper');
+  if (roleWrapper) {
+    roleWrapper.style.display = myRole === 'SUPER_ADMIN' ? 'block' : 'none';
+  }
 
   openModal('modal-edit-user');
 }
@@ -1899,6 +2298,8 @@ async function handleEditUser(e) {
   const id = document.getElementById('edit-user-id').value;
   const firstName = document.getElementById('edit-firstname').value.trim();
   const lastName = document.getElementById('edit-lastname').value.trim();
+  const phone = document.getElementById('edit-phone').value.trim();
+  const bio = document.getElementById('edit-bio').value.trim();
   const role = document.getElementById('edit-role').value;
   const isActive = document.getElementById('edit-active').checked;
 
@@ -1906,6 +2307,8 @@ async function handleEditUser(e) {
     await api.updateUser(id, {
       first_name: firstName,
       last_name: lastName,
+      phone,
+      bio,
       role,
       is_active: isActive,
     });
@@ -1923,7 +2326,7 @@ async function handleSoftDeleteUser(userId) {
 
   try {
     await api.softDeleteUser(userId);
-    showToast('Soft Delete Berhasil', `Pengguna ID ${userId} berhasil di-soft delete.`, 'info', '🗑️');
+    showToast('Soft Delete Berhasil', `Pengguna ID ${userId} berhasil di-soft delete (FR-ROLE-05).`, 'info', '🗑️');
     loadAdminUsersList();
   } catch (err) {
     showToast('Gagal Menghapus', err.message, 'error', '❌');

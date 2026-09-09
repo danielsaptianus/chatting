@@ -52,6 +52,7 @@ export class AuthService {
       userId: user.id,
       email: user.email,
       role: user.biodata.role,
+      managed_group_id: user.managed_group_id,
       first_name: user.biodata.first_name,
       last_name: user.biodata.last_name,
     };
@@ -63,9 +64,13 @@ export class AuthService {
       user: {
         id: user.id,
         email: user.email,
+        managed_group_id: user.managed_group_id,
         biodata: {
           first_name: user.biodata.first_name,
           last_name: user.biodata.last_name,
+          bio: user.biodata.bio,
+          phone: user.biodata.phone,
+          avatar_url: user.biodata.avatar_url,
           role: user.biodata.role,
           is_active: user.biodata.is_active,
         },

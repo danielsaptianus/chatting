@@ -27,4 +27,22 @@ export class CreateUserDto {
   @IsEnum(Role)
   @IsOptional()
   role?: Role;
+
+  @ApiProperty({ example: '+628123456789', required: false })
+  @IsString()
+  @IsOptional()
+  phone?: string;
+
+  @ApiProperty({ example: 'Software Engineer', required: false })
+  @IsString()
+  @IsOptional()
+  bio?: string;
+
+  @ApiProperty({ example: 1, required: false, description: 'Target group ID if role is ADMIN (Super Admin only)' })
+  @IsOptional()
+  managed_group_id?: number;
+
+  @ApiProperty({ example: 1, required: false, description: 'Group ID to enroll user into' })
+  @IsOptional()
+  group_id?: number;
 }

@@ -17,36 +17,52 @@ const adapter = new PrismaPg(pool as any);
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  console.log('🌱 Starting database seeding (Idempotent mode)...');
+  console.log('🌱 Starting database seeding (Multi-Role SRS Idempotent mode)...');
 
   const defaultPassword = 'password123';
   const hashedPassword = await bcrypt.hash(defaultPassword, 10);
 
-  // 1. Seed Users
+  // 1. Seed Users (Super Admin, Group Admin, and Regular Users)
   const usersData = [
     {
-      email: 'admin@chatting.com',
+      email: 'superadmin@chatting.com',
       firstName: 'Super',
       lastName: 'Admin',
+      role: Role.SUPER_ADMIN,
+      phone: '+628111222333',
+      bio: 'Platform Super Administrator with global system management.',
+    },
+    {
+      email: 'admin@chatting.com',
+      firstName: 'Admin',
+      lastName: 'Grup',
       role: Role.ADMIN,
+      phone: '+628123456780',
+      bio: 'Administrator Grup khusus saluran Pengumuman Resmi ChatSphere.',
     },
     {
       email: 'daniel@chatting.com',
       firstName: 'Daniel',
       lastName: 'Saptianus',
       role: Role.USER,
+      phone: '+628123456789',
+      bio: 'Fullstack Developer & Community Leader.',
     },
     {
       email: 'sarah@chatting.com',
       firstName: 'Sarah',
       lastName: 'Jenkins',
       role: Role.USER,
+      phone: '+628567890123',
+      bio: 'Product Designer & Audio Enthusiast.',
     },
     {
       email: 'budi@chatting.com',
       firstName: 'Budi',
       lastName: 'Santoso',
       role: Role.USER,
+      phone: '+628789012345',
+      bio: 'Software QA & DevOps Specialist.',
     },
   ];
 
@@ -68,19 +84,40 @@ async function main() {
               first_name: u.firstName,
               last_name: u.lastName,
               role: u.role,
+              phone: u.phone,
+              bio: u.bio,
               is_active: true,
             },
           },
         },
         include: { biodata: true },
       });
-      console.log(`   ➕ User created: ${u.email}`);
+      console.log(`   ➕ User created: ${u.email} (${u.role})`);
     } else {
-      console.log(`   ℹ️  User already exists: ${u.email}`);
+      // Upsert role/phone/bio to keep in sync with SRS
+      await prisma.biodata.upsert({
+        where: { user_id: user.id },
+        create: {
+          user_id: user.id,
+          first_name: u.firstName,
+          last_name: u.lastName,
+          role: u.role,
+          phone: u.phone,
+          bio: u.bio,
+          is_active: true,
+        },
+        update: {
+          role: u.role,
+          phone: user.biodata?.phone || u.phone,
+          bio: user.biodata?.bio || u.bio,
+        },
+      });
+      console.log(`   ℹ️  User synced: ${u.email} (${u.role})`);
     }
     createdUsers[u.email] = user;
   }
 
+  const superAdmin = createdUsers['superadmin@chatting.com'];
   const admin = createdUsers['admin@chatting.com'];
   const daniel = createdUsers['daniel@chatting.com'];
   const sarah = createdUsers['sarah@chatting.com'];
@@ -97,7 +134,7 @@ async function main() {
       data: {
         name: communityName,
         description: 'Wadah silaturahmi, kolaborasi developer, dan pengumuman update aplikasi ChatSphere.',
-        created_by_id: admin.id,
+        created_by_id: superAdmin.id,
       },
     });
     console.log(`   ➕ Community created: ${communityName}`);
@@ -107,7 +144,8 @@ async function main() {
 
   // 3. Seed Community Members
   const communityMembers = [
-    { user: admin, role: CommunityRole.COMMUNITY_OWNER },
+    { user: superAdmin, role: CommunityRole.COMMUNITY_OWNER },
+    { user: admin, role: CommunityRole.COMMUNITY_ADMIN },
     { user: daniel, role: CommunityRole.COMMUNITY_ADMIN },
     { user: sarah, role: CommunityRole.COMMUNITY_MEMBER },
     { user: budi, role: CommunityRole.COMMUNITY_MEMBER },
@@ -142,10 +180,10 @@ async function main() {
       description: 'Saluran informasi dan rilis fitur terbaru dari Admin.',
       isAnnouncement: true,
       onlyAdminsCanPost: true,
-      creator: admin,
+      creator: superAdmin,
       sampleMessages: [
-        { sender: admin, text: 'Halo semuanya! Selamat datang di aplikasi obrolan ChatSphere.' },
-        { sender: admin, text: 'Fitur panggilan suara WebRTC dan ekspor chat sekarang sudah aktif!' },
+        { sender: superAdmin, text: 'Halo semuanya! Selamat datang di aplikasi obrolan ChatSphere.' },
+        { sender: admin, text: 'Hierarki multi-role, isolasi akun per grup, dan timer dering 30 detik sekarang telah aktif!' },
       ],
     },
     {
@@ -156,8 +194,8 @@ async function main() {
       creator: daniel,
       sampleMessages: [
         { sender: daniel, text: 'Halo rekan-rekan! Apakah koneksi suara dan real-time chat berjalan lancar?' },
-        { sender: sarah, text: 'Halo Mas Daniel! Saya coba test panggilan dan chat lancar tanpa kendala.' },
-        { sender: budi, text: 'Mantap, tampilan checkmark pesan ala WhatsApp juga sudah rapi!' },
+        { sender: sarah, text: 'Halo Mas Daniel! Saya coba upload avatar dan test audio call lancar tanpa kendala.' },
+        { sender: budi, text: 'Mantap, tampilan checkmark pesan ala WhatsApp dan kartu profil publik juga sudah rapi!' },
       ],
     },
   ];
@@ -192,7 +230,7 @@ async function main() {
       console.log(`   🔗 Linked group "${g.name}" to community`);
 
       // Add members to group
-      const groupUsers = [admin, daniel, sarah, budi];
+      const groupUsers = [superAdmin, admin, daniel, sarah, budi];
       for (const u of groupUsers) {
         const role = u.id === g.creator.id ? GroupRole.OWNER : GroupRole.MEMBER;
         await prisma.groupMember.create({
@@ -217,14 +255,23 @@ async function main() {
     } else {
       console.log(`   ℹ️  Group already exists: ${g.name}`);
     }
+
+    // Bind admin@chatting.com to manage the announcement group (Scoped Tenancy: managed_group_id)
+    if (g.isAnnouncement) {
+      await prisma.user.update({
+        where: { id: admin.id },
+        data: { managed_group_id: group.id },
+      });
+      console.log(`   🔒 Scoped Admin (${admin.email}) assigned to manage group "${group.name}" (#${group.id})`);
+    }
   }
 
   // 5. Seed Direct Messages (Sample conversation)
   const existingDm = await prisma.directMessage.findFirst({
     where: {
       OR: [
-        { sender_id: admin.id, receiver_id: daniel.id },
-        { sender_id: daniel.id, receiver_id: admin.id },
+        { sender_id: superAdmin.id, receiver_id: daniel.id },
+        { sender_id: daniel.id, receiver_id: superAdmin.id },
       ],
     },
   });
@@ -233,22 +280,22 @@ async function main() {
     await prisma.directMessage.createMany({
       data: [
         {
-          sender_id: admin.id,
+          sender_id: superAdmin.id,
           receiver_id: daniel.id,
-          content: 'Halo Daniel! Database Neon dan deployment Render sudah terhubung.',
+          content: 'Halo Daniel! Database Neon dan deployment Render sudah terhubung dengan skema multi-role.',
           is_read: true,
           read_at: new Date(),
         },
         {
           sender_id: daniel.id,
-          receiver_id: admin.id,
-          content: 'Siap min! Semua data awal dan seeder sudah berjalan otomatis.',
+          receiver_id: superAdmin.id,
+          content: 'Siap! Sistem isolasi akun dan profil biodata avatar juga sudah siap diuji.',
           is_read: true,
           read_at: new Date(),
         },
       ],
     });
-    console.log(`   ➕ Direct messages seeded between Admin and Daniel`);
+    console.log(`   ➕ Direct messages seeded between Super Admin and Daniel`);
   }
 
   // 6. Seed Welcome Notification for Daniel
@@ -262,7 +309,7 @@ async function main() {
         user_id: daniel.id,
         type: NotificationType.USER_REGISTERED,
         title: 'Selamat Datang di ChatSphere!',
-        message: 'Akun Anda telah aktif. Anda dapat mulai mengobrol, bergabung ke komunitas, dan mencoba panggilan suara.',
+        message: 'Akun Anda telah aktif dengan akses obrolan, komunitas, profil avatar, dan WebRTC voice call.',
         is_read: false,
       },
     });
@@ -277,10 +324,11 @@ async function main() {
   console.log(`   - Total Group Messages: ${await prisma.groupMessage.count()}`);
   console.log(`   - Total Direct Messages: ${await prisma.directMessage.count()}\n`);
   console.log('🔑 Default Accounts (Password for all: password123):');
-  console.log('   1. Super Admin : admin@chatting.com');
-  console.log('   2. Daniel      : daniel@chatting.com');
-  console.log('   3. Sarah       : sarah@chatting.com');
-  console.log('   4. Budi        : budi@chatting.com\n');
+  console.log('   1. Super Admin : superadmin@chatting.com (SUPER_ADMIN)');
+  console.log('   2. Group Admin : admin@chatting.com (ADMIN - Scoped to Announcement Group)');
+  console.log('   3. Daniel      : daniel@chatting.com (USER)');
+  console.log('   4. Sarah       : sarah@chatting.com (USER)');
+  console.log('   5. Budi        : budi@chatting.com (USER)\n');
 }
 
 main()

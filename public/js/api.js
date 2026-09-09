@@ -144,6 +144,38 @@ const api = {
   },
 
   // ==========================================
+  // AVATAR & PUBLIC PROFILE (FR-BIO-01 - FR-BIO-04)
+  // ==========================================
+  async uploadAvatar(formData) {
+    const url = `${API_BASE}/users/me/avatar`;
+    const token = this.getToken();
+    const headers = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.message || 'Gagal mengunggah foto profil');
+    }
+    return data;
+  },
+
+  async deleteAvatar() {
+    return this.request('/users/me/avatar', {
+      method: 'DELETE',
+    });
+  },
+
+  async getPublicProfile(userId) {
+    return this.request(`/users/${userId}/public-profile`);
+  },
+
+  // ==========================================
   // CHAT (GROUPS & PC)
   // ==========================================
   async createGroup(name, description) {

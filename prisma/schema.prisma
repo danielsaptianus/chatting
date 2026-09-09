@@ -11,6 +11,7 @@ datasource db {
 // ============================================
 
 enum Role {
+  SUPER_ADMIN
   ADMIN
   USER
 }
@@ -83,6 +84,10 @@ model User {
   notifications         Notification[]
   group_join_requests   GroupJoinRequest[]
 
+  // Scoped Group Tenancy for ADMIN
+  managed_group_id      Int?
+  managed_group         Group?               @relation("ManagedGroupAdmin", fields: [managed_group_id], references: [id], onDelete: SetNull)
+
   // Community & Calls Relations
   created_communities   Community[]          @relation("CommunityCreator")
   community_memberships CommunityMember[]
@@ -97,6 +102,9 @@ model Biodata {
   user_id    Int      @unique
   first_name String
   last_name  String
+  bio        String?  @db.VarChar(150)
+  phone      String?
+  avatar_url String?
   role       Role     @default(USER)
   is_active  Boolean  @default(true)
   created_at DateTime @default(now())
@@ -143,6 +151,7 @@ model Group {
   join_requests   GroupJoinRequest[]
   community_group CommunityGroup?
   call_sessions   CallSession[]
+  managed_admins  User[]             @relation("ManagedGroupAdmin")
 
   @@map("groups")
 }

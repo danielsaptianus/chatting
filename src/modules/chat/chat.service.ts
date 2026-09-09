@@ -81,7 +81,7 @@ export class ChatService {
   async getAllGroups(userId?: number) {
     if (userId) {
       const user = await this.prisma.biodata.findUnique({ where: { user_id: userId } });
-      if (user?.role !== Role.ADMIN) {
+      if (user?.role !== Role.SUPER_ADMIN && user?.role !== Role.ADMIN) {
         throw new ForbiddenException('Daftar seluruh grup hanya dapat diakses oleh Administrator');
       }
     }
@@ -125,7 +125,7 @@ export class ChatService {
       where: { user_id: currentUserId },
     });
     const isStaff = requesterMember && (requesterMember.role === GroupRole.OWNER || requesterMember.role === GroupRole.ADMIN);
-    const isSystemAdmin = currentUser?.role === Role.ADMIN;
+    const isSystemAdmin = currentUser?.role === Role.SUPER_ADMIN || currentUser?.role === Role.ADMIN;
     if (!isStaff && !isSystemAdmin) {
       throw new ForbiddenException('Hanya admin atau owner grup yang dapat menambahkan anggota');
     }
@@ -251,7 +251,7 @@ export class ChatService {
     const isGroupStaff =
       requesterMember &&
       (requesterMember.role === GroupRole.OWNER || requesterMember.role === GroupRole.ADMIN);
-    const isSystemAdmin = currentUser?.role === Role.ADMIN;
+    const isSystemAdmin = currentUser?.role === Role.SUPER_ADMIN || currentUser?.role === Role.ADMIN;
 
     if (!isGroupStaff && !isSystemAdmin) {
       throw new ForbiddenException('Only group owner or admin can view join requests');
@@ -289,7 +289,7 @@ export class ChatService {
     const isGroupStaff =
       requesterMember &&
       (requesterMember.role === GroupRole.OWNER || requesterMember.role === GroupRole.ADMIN);
-    const isSystemAdmin = currentUser?.role === Role.ADMIN;
+    const isSystemAdmin = currentUser?.role === Role.SUPER_ADMIN || currentUser?.role === Role.ADMIN;
 
     if (!isGroupStaff && !isSystemAdmin) {
       throw new ForbiddenException('Only group owner or admin can approve join requests');
@@ -371,7 +371,7 @@ export class ChatService {
     const isGroupStaff =
       requesterMember &&
       (requesterMember.role === GroupRole.OWNER || requesterMember.role === GroupRole.ADMIN);
-    const isSystemAdmin = currentUser?.role === Role.ADMIN;
+    const isSystemAdmin = currentUser?.role === Role.SUPER_ADMIN || currentUser?.role === Role.ADMIN;
 
     if (!isGroupStaff && !isSystemAdmin) {
       throw new ForbiddenException('Only group owner or admin can reject join requests');
@@ -418,7 +418,7 @@ export class ChatService {
     });
 
     const isStaff = requester && (requester.role === GroupRole.OWNER || requester.role === GroupRole.ADMIN);
-    const isSystemAdmin = currentUser?.role === Role.ADMIN;
+    const isSystemAdmin = currentUser?.role === Role.SUPER_ADMIN || currentUser?.role === Role.ADMIN;
 
     if (!isStaff && !isSystemAdmin) {
       throw new ForbiddenException('Hanya admin atau owner grup yang dapat melihat tautan undangan');
@@ -452,7 +452,7 @@ export class ChatService {
     });
 
     const isStaff = requester && (requester.role === GroupRole.OWNER || requester.role === GroupRole.ADMIN);
-    const isSystemAdmin = currentUser?.role === Role.ADMIN;
+    const isSystemAdmin = currentUser?.role === Role.SUPER_ADMIN || currentUser?.role === Role.ADMIN;
 
     if (!isStaff && !isSystemAdmin) {
       throw new ForbiddenException('Hanya admin atau owner grup yang dapat menarik tautan undangan');

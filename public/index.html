@@ -57,10 +57,11 @@
         </button>
 
         <div class="seed-hints">
-          <small>🔑 <strong>Akun Demo:</strong></small>
+          <small>🔑 <strong>Akun Demo (Password: password123):</strong></small>
           <div class="seed-chips">
-            <button type="button" class="chip" onclick="fillLogin('admin@chatting.com', 'password123')">Admin Demo</button>
-            <button type="button" class="chip" onclick="fillLogin('user@chatting.com', 'password123')">User Demo</button>
+            <button type="button" class="chip" onclick="fillLogin('superadmin@chatting.com', 'password123')">Super Admin</button>
+            <button type="button" class="chip" onclick="fillLogin('admin@chatting.com', 'password123')">Admin Grup</button>
+            <button type="button" class="chip" onclick="fillLogin('daniel@chatting.com', 'password123')">User (Daniel)</button>
           </div>
         </div>
       </form>
@@ -136,13 +137,14 @@
           </div>
         </div>
 
-        <!-- User Profile Dropdown -->
-        <div class="user-profile-pill">
+        <!-- User Profile Pill -->
+        <div class="user-profile-pill" id="user-profile-pill" title="Klik untuk mengedit profil & foto avatar" style="cursor: pointer;">
           <div class="user-avatar" id="current-user-avatar">U</div>
           <div class="user-info-text">
             <span class="user-fullname" id="current-user-name">User</span>
             <span class="user-role-badge" id="current-user-role">USER</span>
           </div>
+          <button id="btn-open-my-profile" class="btn-icon" title="Edit Profil Saya" style="font-size: 0.85rem; margin-right: 4px;">✏️</button>
           <button id="btn-logout" class="btn-icon btn-logout" title="Keluar">⎋</button>
         </div>
       </div>
@@ -480,15 +482,122 @@
     </div>
   </div>
 
-  <!-- Modal: Register User Baru oleh Admin -->
+  <!-- Modal: Profil Saya & Avatar (FR-BIO-01, FR-BIO-02, FR-BIO-03) -->
+  <div id="modal-my-profile" class="modal-overlay hidden">
+    <div class="modal-dialog glass-panel" style="max-width: 480px;">
+      <div class="modal-header">
+        <div>
+          <h3>👤 Profil & Biodata Saya</h3>
+          <p class="subtitle-sm">Perbarui foto profil, nama, telepon, dan bio Anda.</p>
+        </div>
+        <button class="btn-icon modal-close" onclick="closeModal('modal-my-profile')">✕</button>
+      </div>
+      <form id="form-my-profile">
+        <div class="modal-body">
+          <!-- Avatar Section -->
+          <div class="profile-avatar-section" style="display:flex; align-items:center; gap:16px; padding:12px; background:rgba(255,255,255,0.03); border:1px solid var(--border-glass); border-radius:var(--radius-md);">
+            <div class="profile-avatar-preview" id="my-profile-avatar-preview" style="width:72px; height:72px; border-radius:50%; overflow:hidden; border:2px solid var(--primary); display:flex; align-items:center; justify-content:center; background:var(--bg-tertiary); flex-shrink:0;">
+              <img id="my-profile-avatar-img" src="" alt="Avatar" class="avatar-img-preview hidden" style="width:100%; height:100%; object-fit:cover;">
+              <div id="my-profile-avatar-fallback" class="avatar-fallback-preview" style="font-size:1.75rem; font-weight:700; color:var(--primary);">U</div>
+            </div>
+            <div class="profile-avatar-controls" style="flex:1;">
+              <input type="file" id="input-avatar-file" accept="image/jpeg,image/png,image/webp,image/jpg" class="hidden">
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('input-avatar-file').click()">
+                  📷 Unggah Foto
+                </button>
+                <button type="button" class="btn btn-danger-outline btn-sm hidden" id="btn-delete-avatar" onclick="handleDeleteAvatar()">
+                  ✕ Hapus Foto
+                </button>
+              </div>
+              <small style="font-size:0.75rem; color:var(--text-muted); display:block; margin-top:6px;">
+                Maksimal 2 MB (.jpg, .jpeg, .png, .webp)
+              </small>
+            </div>
+          </div>
+
+          <div class="form-row" style="margin-top:14px;">
+            <div class="form-group">
+              <label for="my-profile-firstname">Nama Depan</label>
+              <input type="text" id="my-profile-firstname" required>
+            </div>
+            <div class="form-group">
+              <label for="my-profile-lastname">Nama Belakang</label>
+              <input type="text" id="my-profile-lastname" required>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="my-profile-phone">Nomor Telepon (Kontak)</label>
+            <input type="text" id="my-profile-phone" placeholder="Misal: +628123456789">
+          </div>
+
+          <div class="form-group">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <label for="my-profile-bio">Bio Ringkas (Maksimal 150 Karakter)</label>
+              <span id="bio-char-count" style="font-size:0.75rem; color:var(--text-secondary);">0/150</span>
+            </div>
+            <textarea id="my-profile-bio" rows="3" maxlength="150" placeholder="Tuliskan bio atau deskripsi singkat tentang Anda..."></textarea>
+          </div>
+
+          <div id="my-profile-role-info" class="info-callout" style="font-size:0.8rem; padding:10px; border-radius:8px; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.3); color:var(--text-secondary);">
+            Role: <strong id="my-profile-role-display">USER</strong>
+            <span id="my-profile-managed-group-display" class="hidden"> | Grup Kelola: <strong id="my-profile-group-name">-</strong></span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-my-profile')">Batal</button>
+          <button type="submit" class="btn btn-primary" id="btn-save-my-profile">Simpan Profil 💾</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Kartu Profil Publik (FR-BIO-04) -->
+  <div id="modal-public-profile" class="modal-overlay hidden">
+    <div class="modal-dialog glass-panel" style="max-width:400px; text-align:center;">
+      <div class="modal-header" style="justify-content:flex-end; border-bottom:none; padding-bottom:0;">
+        <button class="btn-icon modal-close" onclick="closeModal('modal-public-profile')">✕</button>
+      </div>
+      <div class="modal-body" style="padding-top:0;">
+        <div class="public-profile-avatar-wrapper" style="margin:0 auto 14px; width:84px; height:84px; border-radius:50%; overflow:hidden; border:3px solid var(--primary); display:flex; align-items:center; justify-content:center; background:var(--bg-tertiary);">
+          <img id="public-profile-avatar-img" src="" alt="Avatar" class="hidden" style="width:100%; height:100%; object-fit:cover;">
+          <div id="public-profile-avatar-fallback" style="font-size:2rem; font-weight:700; color:var(--primary);">U</div>
+        </div>
+        <h3 id="public-profile-name" style="font-size:1.25rem; font-weight:700; color:var(--text-primary);">Nama Pengguna</h3>
+        <span id="public-profile-role-badge" class="badge" style="display:inline-block; margin-top:4px; padding:4px 10px; font-size:0.75rem; border-radius:9999px; background:rgba(99,102,241,0.2); color:#818cf8; font-weight:600;">USER</span>
+
+        <div style="margin-top:16px; padding:12px; background:rgba(255,255,255,0.03); border-radius:10px; border:1px solid var(--border-glass); text-align:left;">
+          <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:600; letter-spacing:0.5px; margin-bottom:4px;">Tentang / Bio</div>
+          <p id="public-profile-bio" style="font-size:0.9rem; color:var(--text-secondary); line-height:1.4; word-break:break-word;">Tidak ada bio.</p>
+        </div>
+
+        <p id="public-profile-member-since" style="font-size:0.75rem; color:var(--text-muted); margin-top:12px;">Bergabung sejak: -</p>
+
+        <div id="public-profile-actions" style="display:flex; gap:10px; margin-top:18px;">
+          <button id="btn-public-profile-chat" class="btn btn-primary" style="flex:1;">💬 Kirim Pesan</button>
+          <button id="btn-public-profile-call" class="btn btn-outline" style="flex:1;">📞 Panggil</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Register User Baru oleh Admin (BR-ROLE-01 s/d BR-ROLE-02, FR-ROLE-01 s/d FR-ROLE-04) -->
   <div id="modal-register-user" class="modal-overlay hidden">
     <div class="modal-dialog glass-panel">
       <div class="modal-header">
-        <h3>Daftarkan User Baru</h3>
+        <div>
+          <h3>Daftarkan Pengguna Baru</h3>
+          <p class="subtitle-sm" id="reg-modal-subtitle">Manajemen akun bertingkat & terisolasi</p>
+        </div>
         <button class="btn-icon modal-close" onclick="closeModal('modal-register-user')">✕</button>
       </div>
       <form id="form-register-user">
         <div class="modal-body">
+          <div id="reg-admin-notice" class="info-callout hidden" style="margin-bottom:12px; padding:10px; border-radius:8px; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.3); font-size:0.8rem; color:var(--text-secondary);">
+            🔒 <strong>Isolasi Tenancy:</strong> Sebagai Admin Grup, pengguna baru otomatis didaftarkan ke grup wewenang Anda.
+          </div>
+
           <div class="form-row">
             <div class="form-group">
               <label for="reg-firstname">Nama Depan</label>
@@ -508,16 +617,38 @@
             <input type="password" id="reg-password" required placeholder="Minimal 6 karakter" minlength="6">
           </div>
           <div class="form-group">
+            <label for="reg-phone">Nomor Telepon (Opsional)</label>
+            <input type="text" id="reg-phone" placeholder="+628123456789">
+          </div>
+          <div class="form-group">
+            <label for="reg-bio">Bio Singkat (Maks 150 Karakter)</label>
+            <textarea id="reg-bio" rows="2" maxlength="150" placeholder="Deskripsi singkat pengguna..."></textarea>
+          </div>
+          <div class="form-group">
             <label for="reg-role">Role</label>
-            <select id="reg-role">
-              <option value="USER">USER</option>
-              <option value="ADMIN">ADMIN</option>
+            <select id="reg-role" onchange="handleRegRoleChange()">
+              <option value="USER">USER (Pengguna Grup)</option>
+              <option value="ADMIN">ADMIN (Admin Grup)</option>
+            </select>
+          </div>
+          <!-- Target Group for Super Admin creating ADMIN -->
+          <div class="form-group hidden" id="group-managed-select-wrapper">
+            <label for="reg-managed-group">Grup yang Dikelola (Wajib untuk ADMIN) *</label>
+            <select id="reg-managed-group">
+              <option value="">-- Pilih Grup Target --</option>
+            </select>
+          </div>
+          <!-- Optional Target Group for Super Admin creating USER -->
+          <div class="form-group hidden" id="group-user-select-wrapper">
+            <label for="reg-user-group">Daftarkan Langsung ke Grup (Opsional)</label>
+            <select id="reg-user-group">
+              <option value="">-- Tanpa Grup Langsung --</option>
             </select>
           </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" onclick="closeModal('modal-register-user')">Batal</button>
-          <button type="submit" class="btn btn-primary">Daftarkan User</button>
+          <button type="submit" class="btn btn-primary">Daftarkan User 🚀</button>
         </div>
       </form>
     </div>
@@ -544,10 +675,19 @@
             </div>
           </div>
           <div class="form-group">
+            <label for="edit-phone">Nomor Telepon</label>
+            <input type="text" id="edit-phone" placeholder="+628123456789">
+          </div>
+          <div class="form-group">
+            <label for="edit-bio">Bio (Maks 150 Karakter)</label>
+            <textarea id="edit-bio" rows="2" maxlength="150"></textarea>
+          </div>
+          <div class="form-group" id="edit-role-wrapper">
             <label for="edit-role">Role</label>
             <select id="edit-role">
               <option value="USER">USER</option>
               <option value="ADMIN">ADMIN</option>
+              <option value="SUPER_ADMIN">SUPER_ADMIN</option>
             </select>
           </div>
           <div class="form-group">

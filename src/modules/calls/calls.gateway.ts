@@ -29,10 +29,21 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     Map<string, { userId: number; userName: string }>
   >();
 
+  // Track pending 1-on-1 call timeouts: callId -> NodeJS.Timeout (BR-CALL-01: 30s ring limit)
+  private callTimeouts = new Map<number, NodeJS.Timeout>();
+
   constructor(
     private readonly jwtService: JwtService,
     private readonly callsService: CallsService,
   ) {}
+
+  private clearCallTimeout(callId: number) {
+    const timer = this.callTimeouts.get(callId);
+    if (timer) {
+      clearTimeout(timer);
+      this.callTimeouts.delete(callId);
+    }
+  }
 
   async handleConnection(client: Socket) {
     try {
@@ -93,6 +104,23 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       callType: 'DIRECT',
     });
 
+    // BR-CALL-01: 30 seconds ring timeout -> auto mark as MISSED if unanswered
+    const timeout = setTimeout(async () => {
+      this.callTimeouts.delete(callSession.id);
+      await this.callsService.updateCallStatus(callSession.id, CallStatus.MISSED, 0);
+
+      this.server.to(`user_${callerId}`).emit('call:timeout', {
+        callId: callSession.id,
+        message: 'Panggilan tidak dijawab (waktu habis 30 detik).',
+      });
+      this.server.to(`user_${data.receiverId}`).emit('call:timeout', {
+        callId: callSession.id,
+        message: 'Panggilan tak terjawab.',
+      });
+    }, 30000);
+
+    this.callTimeouts.set(callSession.id, timeout);
+
     return { callId: callSession.id };
   }
 
@@ -101,6 +129,8 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { callId: number; callerId: number },
   ) {
+    this.clearCallTimeout(data.callId);
+
     const receiverId = client.data?.user?.userId;
     this.server.to(`user_${data.callerId}`).emit('call:accepted', {
       callId: data.callId,
@@ -114,6 +144,8 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { callId: number; callerId: number; reason?: string },
   ) {
+    this.clearCallTimeout(data.callId);
+
     await this.callsService.updateCallStatus(data.callId, CallStatus.REJECTED);
 
     this.server.to(`user_${data.callerId}`).emit('call:rejected', {
@@ -141,6 +173,8 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody()
     data: { callId: number; targetUserId?: number; groupId?: number; duration: number },
   ) {
+    this.clearCallTimeout(data.callId);
+
     await this.callsService.updateCallStatus(
       data.callId,
       CallStatus.COMPLETED,

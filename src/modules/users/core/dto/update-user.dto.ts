@@ -22,4 +22,18 @@ export class UpdateUserDto {
   @IsBoolean()
   @IsOptional()
   is_active?: boolean;
+
+  @ApiProperty({ example: '+628123456789', required: false })
+  @IsString()
+  @IsOptional()
+  phone?: string;
+
+  @ApiProperty({ example: 'Passionate software developer', required: false, maxLength: 150 })
+  @IsString()
+  @IsOptional()
+  bio?: string;
+
+  @ApiProperty({ example: 1, required: false })
+  @IsOptional()
+  managed_group_id?: number;
 }
