@@ -87,6 +87,10 @@ async function checkAuthStatus() {
 function showAuthScreen() {
   document.getElementById('auth-screen').classList.remove('hidden');
   document.getElementById('app-screen').classList.add('hidden');
+  // Ensure all modals are closed upon returning to auth screen
+  document.querySelectorAll('.modal-overlay').forEach((modal) => {
+    modal.classList.add('hidden');
+  });
   socketClient.disconnect();
 }
 
@@ -133,7 +137,9 @@ function setupEventListeners() {
   });
 
   // Logout
-  document.getElementById('btn-logout').addEventListener('click', async () => {
+  document.getElementById('btn-logout').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    closeModal('modal-my-profile');
     await api.logout();
     state.currentUser = null;
     showAuthScreen();
