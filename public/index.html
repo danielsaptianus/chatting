@@ -113,6 +113,11 @@
       </div>
 
       <div class="header-right">
+        <!-- Super Admin Region Management Button (FR-REG-01) -->
+        <button id="btn-open-regions" class="btn btn-outline btn-sm hidden" style="border-color: rgba(99, 102, 241, 0.4); color: #a5b4fc;">
+          <span>📍 Kelola Region</span>
+        </button>
+
         <!-- Admin Management Button (Admin only) -->
         <button id="btn-open-admin" class="btn btn-outline btn-sm hidden">
           <span>👥 Kelola User</span>
@@ -142,7 +147,10 @@
           <div class="user-avatar" id="current-user-avatar">U</div>
           <div class="user-info-text">
             <span class="user-fullname" id="current-user-name">User</span>
-            <span class="user-role-badge" id="current-user-role">USER</span>
+            <div style="display: flex; gap: 4px; align-items: center;">
+              <span class="user-role-badge" id="current-user-role">USER</span>
+              <span class="user-role-badge hidden" id="current-user-region" style="background: rgba(99, 102, 241, 0.2); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.4); font-size: 0.68rem; padding: 1px 6px;">Region</span>
+            </div>
           </div>
           <button id="btn-open-my-profile" class="btn-icon" title="Edit Profil Saya" style="font-size: 0.85rem;">✏️</button>
         </div>
@@ -629,8 +637,16 @@
           <div class="form-group">
             <label for="reg-role">Role</label>
             <select id="reg-role" onchange="handleRegRoleChange()">
-              <option value="USER">USER (Pengguna Grup)</option>
+              <option value="USER">USER (Pengguna Wilayah/Region)</option>
+              <option value="REGION_ADMIN">REGION_ADMIN (Admin Wilayah / Region)</option>
               <option value="ADMIN">ADMIN (Admin Grup)</option>
+            </select>
+          </div>
+          <!-- Region Assignment for Super Admin -->
+          <div class="form-group" id="region-select-wrapper">
+            <label for="reg-user-region">Pilih Wilayah / Region:</label>
+            <select id="reg-user-region">
+              <option value="">-- Pilih Wilayah / Region --</option>
             </select>
           </div>
           <!-- Target Group for Super Admin creating ADMIN -->
@@ -688,6 +704,7 @@
             <label for="edit-role">Role</label>
             <select id="edit-role">
               <option value="USER">USER</option>
+              <option value="REGION_ADMIN">REGION_ADMIN</option>
               <option value="ADMIN">ADMIN</option>
               <option value="SUPER_ADMIN">SUPER_ADMIN</option>
             </select>
@@ -707,7 +724,7 @@
     </div>
   </div>
 
-  <!-- Modal: Incoming Call (FR-CALL-03) -->
+  <!-- Modal: Incoming Call (FR-CALL-03, FR-VC-01, FR-VC-02) -->
   <div id="modal-incoming-call" class="modal-overlay hidden" style="z-index: 100;">
     <div class="modal-dialog glass-panel incoming-call-card">
       <div class="incoming-call-avatar-wrapper">
@@ -715,10 +732,10 @@
         <div class="incoming-call-avatar" id="incoming-call-avatar">U</div>
       </div>
       <h3 id="incoming-call-name" class="incoming-call-name">Nama Pengguna</h3>
-      <p id="incoming-call-type" class="incoming-call-sub">Panggilan Suara...</p>
+      <p id="incoming-call-type" class="incoming-call-sub">Panggilan Masuk...</p>
       <div class="incoming-call-actions">
         <button class="btn btn-call-accept" onclick="webrtcManager.acceptIncomingCall()">
-          <span>📞 Terima</span>
+          <span id="incoming-call-btn-text">📞 Terima</span>
         </button>
         <button class="btn btn-call-reject" onclick="webrtcManager.rejectIncomingCall()">
           <span>✕ Tolak</span>
@@ -727,23 +744,50 @@
     </div>
   </div>
 
-  <!-- Modal / Floating Card: Active Call (FR-CALL-02, FR-CALL-04, FR-CALL-05) -->
+  <!-- Modal / Floating Card: Active Call (FR-CALL-01..05, FR-VC-01..04) -->
   <div id="modal-active-call" class="active-call-overlay hidden">
-    <div class="active-call-card glass-panel">
+    <div class="active-call-card glass-panel" id="active-call-card">
       <div class="active-call-header">
         <div class="active-call-dot"></div>
         <div class="active-call-titles">
-          <h4 id="active-call-title">Panggilan Suara</h4>
+          <h4 id="active-call-title">Panggilan</h4>
           <span id="active-call-status" class="active-call-status-text">Terhubung</span>
         </div>
         <span id="active-call-participants" class="active-call-participants-badge"></span>
       </div>
+
+      <!-- Video Call Viewport (FR-VC-01..04) -->
+      <div id="video-call-viewport" class="video-call-viewport hidden">
+        <div class="video-remote-wrapper" id="video-remote-wrapper">
+          <video id="remote-video" autoplay playsinline></video>
+          <div id="remote-video-fallback" class="video-fallback">
+            <div class="video-fallback-avatar" id="remote-video-avatar">U</div>
+            <span id="remote-video-name">Pengguna</span>
+          </div>
+          <div id="remote-screen-badge" class="screen-badge hidden">🖥️ Layar Dibagikan</div>
+        </div>
+        <div class="video-local-pip" id="video-local-pip">
+          <video id="local-video" autoplay playsinline muted></video>
+          <div id="local-video-fallback" class="video-fallback-pip hidden">📷</div>
+          <span class="pip-label">Anda</span>
+        </div>
+        <div id="group-video-grid" class="group-video-grid hidden">
+          <!-- Dynamic group tiles -->
+        </div>
+      </div>
+
       <div class="active-call-timer" id="active-call-duration">00:00</div>
-      <div class="active-call-actions">
-        <button id="btn-call-mute" class="btn btn-outline btn-sm" onclick="webrtcManager.toggleMute()">
+      <div class="active-call-actions" id="active-call-actions">
+        <button id="btn-call-mute" class="btn btn-outline btn-sm" onclick="webrtcManager.toggleMute()" title="Nyalakan/Matikan Suara">
           <span>🎙️ Matikan Mic</span>
         </button>
-        <button id="btn-call-end" class="btn btn-danger btn-sm" onclick="webrtcManager.endCall()">
+        <button id="btn-call-camera" class="btn btn-outline btn-sm hidden" onclick="webrtcManager.toggleCamera()" title="Nyalakan/Matikan Kamera">
+          <span>📹 Matikan Kamera</span>
+        </button>
+        <button id="btn-call-screen" class="btn btn-outline btn-sm hidden" onclick="webrtcManager.toggleScreenShare()" title="Bagikan Tampilan Layar (FR-VC-03)">
+          <span>🖥️ Bagikan Layar</span>
+        </button>
+        <button id="btn-call-end" class="btn btn-danger btn-sm" onclick="webrtcManager.endCall()" title="Akhiri Panggilan">
           <span>📞 Akhiri</span>
         </button>
       </div>
@@ -881,6 +925,91 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-community-members')">Tutup</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Modal: Kelola Region / Wilayah (FR-REG-01, FR-REG-02, BR-TENANT-01) -->
+  <div id="modal-admin-regions" class="modal-overlay hidden">
+    <div class="modal-dialog glass-panel" style="max-width: 680px;">
+      <div class="modal-header">
+        <div>
+          <h3>📍 Manajemen Wilayah / Region</h3>
+          <p class="subtitle-sm">Isolasi multi-tenant hirarkis berbasis Region (SRS V2)</p>
+        </div>
+        <button class="btn-icon modal-close" onclick="closeModal('modal-admin-regions')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+          <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0;">
+            Daftar region aktif. Tiap region dibatasi ketat memiliki tepat 1 Admin Region (BR-TENANT-01).
+          </p>
+          <button id="btn-toggle-create-region" class="btn btn-primary btn-sm" onclick="toggleCreateRegionForm()">
+            <span>➕ Buat Region Baru</span>
+          </button>
+        </div>
+
+        <!-- Form Tambah Region (Collapsible) -->
+        <form id="form-create-region" class="glass-panel hidden" style="padding: 14px; margin-bottom: 16px; border: 1px solid rgba(99, 102, 241, 0.3);">
+          <h4 style="margin: 0 0 10px 0; font-size: 0.95rem; color: var(--text-primary);">Formulir Buat Region Baru</h4>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="new-region-name">Nama Region</label>
+              <input type="text" id="new-region-name" placeholder="Misal: Region A" required>
+            </div>
+            <div class="form-group">
+              <label for="new-region-code">Kode Unik Region</label>
+              <input type="text" id="new-region-code" placeholder="Misal: REG-A" required style="text-transform: uppercase;">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="new-region-desc">Deskripsi Region (Opsional)</label>
+            <input type="text" id="new-region-desc" placeholder="Wilayah operasional...">
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="toggleCreateRegionForm(false)">Batal</button>
+            <button type="submit" class="btn btn-primary btn-sm">Simpan Region 🚀</button>
+          </div>
+        </form>
+
+        <!-- Region List Cards -->
+        <div id="admin-regions-list" class="region-card-grid">
+          <div class="empty-state">Memuat data region...</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-admin-regions')">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Tugaskan Admin Region (BR-TENANT-01) -->
+  <div id="modal-assign-region-admin" class="modal-overlay hidden">
+    <div class="modal-dialog glass-panel" style="max-width: 440px;">
+      <div class="modal-header">
+        <div>
+          <h3>🛡️ Tugaskan Admin Region</h3>
+          <p class="subtitle-sm" id="assign-region-title">Tepat 1 Admin per Region (BR-TENANT-01)</p>
+        </div>
+        <button class="btn-icon modal-close" onclick="closeModal('modal-assign-region-admin')">✕</button>
+      </div>
+      <form id="form-assign-region-admin">
+        <input type="hidden" id="assign-region-id">
+        <div class="modal-body">
+          <div class="info-callout" style="margin-bottom: 12px; padding: 10px; border-radius: 8px; background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); font-size: 0.8rem; color: var(--text-secondary);">
+            🔒 <strong>Aturan BR-TENANT-01:</strong> 1 Region hanya boleh dikelola oleh 1 Admin Region. Jika user belum ber-role REGION_ADMIN, perannya akan otomatis ditingkatkan menjadi REGION_ADMIN dan diikat ke region ini.
+          </div>
+          <div class="form-group">
+            <label for="select-region-admin-user">Pilih Pengguna:</label>
+            <select id="select-region-admin-user" required>
+              <option value="">Memuat daftar user...</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-assign-region-admin')">Batal</button>
+          <button type="submit" class="btn btn-primary">Tugaskan Admin 🛡️</button>
+        </div>
+      </form>
     </div>
   </div>
 

@@ -27,6 +27,7 @@ export class ChatService {
   // ====================================================================
 
   async createGroup(userId: number, dto: CreateGroupDto) {
+    const creator = await this.prisma.user.findUnique({ where: { id: userId } });
     const inviteCode = 'inv_' + crypto.randomBytes(5).toString('hex');
     const group = await this.prisma.group.create({
       data: {
@@ -34,6 +35,7 @@ export class ChatService {
         description: dto.description,
         invite_code: inviteCode,
         created_by_id: userId,
+        region_id: creator?.region_id || null,
         members: {
           create: {
             user_id: userId,
@@ -79,16 +81,28 @@ export class ChatService {
   }
 
   async getAllGroups(userId?: number) {
+    let whereClause: any = { deleted_at: null };
+
     if (userId) {
-      const user = await this.prisma.biodata.findUnique({ where: { user_id: userId } });
-      if (user?.role !== Role.SUPER_ADMIN && user?.role !== Role.ADMIN) {
-        throw new ForbiddenException('Daftar seluruh grup hanya dapat diakses oleh Administrator');
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        include: { biodata: true },
+      });
+      const role = user?.biodata?.role;
+
+      if (role !== Role.SUPER_ADMIN) {
+        if (role !== Role.REGION_ADMIN && role !== Role.ADMIN) {
+          throw new ForbiddenException('Daftar seluruh grup hanya dapat diakses oleh Administrator');
+        }
+        const userRegionId = user?.managed_region_id || user?.region_id;
+        if (userRegionId) {
+          whereClause.region_id = userRegionId;
+        }
       }
     }
+
     return this.prisma.group.findMany({
-      where: {
-        deleted_at: null,
-      },
+      where: whereClause,
       include: {
         creator: {
           select: { id: true, email: true, biodata: true },
@@ -642,12 +656,28 @@ export class ChatService {
   // ====================================================================
 
   async sendDirectMessage(senderId: number, dto: SendDirectMessageDto) {
+    const sender = await this.prisma.user.findUnique({
+      where: { id: senderId },
+      include: { biodata: true },
+    });
+
     const receiver = await this.prisma.user.findFirst({
       where: { id: dto.receiverId, deleted_at: null },
+      include: { biodata: true },
     });
 
     if (!receiver) {
       throw new NotFoundException('Recipient user not found');
+    }
+
+    // FR-USER-02, BR-TENANT-02: Prevent cross-region direct messages
+    const senderRole = sender?.biodata?.role;
+    if (senderRole !== Role.SUPER_ADMIN && sender?.region_id && receiver.region_id) {
+      if (Number(sender.region_id) !== Number(receiver.region_id)) {
+        throw new ForbiddenException(
+          'Proteksi Lintas Region: Dilarang berkirim pesan dengan pengguna di luar Region Anda (FR-USER-02, BR-TENANT-02)',
+        );
+      }
     }
 
     const message = await this.prisma.directMessage.create({

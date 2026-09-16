@@ -32,9 +32,9 @@ import { Role } from '@prisma/client';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.REGION_ADMIN, Role.ADMIN)
   @Post()
-  @ApiOperation({ summary: 'Register a new user (Super Admin or Group Admin)' })
+  @ApiOperation({ summary: 'Register a new user (Super Admin or Region Admin)' })
   async createUser(
     @GetUser() currentUser: any,
     @Body() dto: CreateUserDto,
@@ -92,9 +92,12 @@ export class UsersController {
   }
 
   @Get(':id/public-profile')
-  @ApiOperation({ summary: 'Get sanitized public profile card of a user' })
-  async getPublicProfile(@Param('id', ParseIntPipe) id: number) {
-    return this.usersService.getPublicProfile(id);
+  @ApiOperation({ summary: 'Get sanitized public profile card of a user (FR-BIO-04, FR-USER-02)' })
+  async getPublicProfile(
+    @Param('id', ParseIntPipe) id: number,
+    @GetUser() currentUser: any,
+  ) {
+    return this.usersService.getPublicProfile(id, currentUser);
   }
 
   @Get(':id')
@@ -104,7 +107,7 @@ export class UsersController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update user detail (Super Admin, Group Admin for members, or self)' })
+  @ApiOperation({ summary: 'Update user detail (Super Admin, Region Admin for members, or self)' })
   async update(
     @GetUser() currentUser: any,
     @Param('id', ParseIntPipe) id: number,
@@ -113,9 +116,9 @@ export class UsersController {
     return this.usersService.update(currentUser, id, dto);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.REGION_ADMIN, Role.ADMIN)
   @Delete(':id')
-  @ApiOperation({ summary: 'Soft delete a user (Super Admin or Group Admin within group)' })
+  @ApiOperation({ summary: 'Soft delete a user (Super Admin or Region Admin within region)' })
   async softDelete(
     @GetUser() currentUser: any,
     @Param('id', ParseIntPipe) id: number,

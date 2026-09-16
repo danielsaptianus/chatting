@@ -402,4 +402,36 @@ const api = {
   async getCallHistory() {
     return this.request('/calls/history');
   },
+
+  // ==========================================
+  // REGIONS (FR-REG-01, FR-REG-02, BR-TENANT-01)
+  // ==========================================
+  async getRegions() {
+    return this.request('/regions');
+  },
+
+  async getRegion(id) {
+    return this.request(`/regions/${id}`);
+  },
+
+  async createRegion(name, code, description) {
+    return this.request('/regions', {
+      method: 'POST',
+      body: JSON.stringify({ name, code, description }),
+    });
+  },
+
+  async updateRegion(id, data) {
+    return this.request(`/regions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async assignRegionAdmin(regionId, userId) {
+    return this.request(`/regions/${regionId}/assign-admin`, {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  },
 };

@@ -12,6 +12,7 @@ datasource db {
 
 enum Role {
   SUPER_ADMIN
+  REGION_ADMIN
   ADMIN
   USER
 }
@@ -31,6 +32,11 @@ enum CommunityRole {
 enum CallType {
   DIRECT
   GROUP
+}
+
+enum CallMediaType {
+  AUDIO
+  VIDEO
 }
 
 enum CallStatus {
@@ -62,6 +68,29 @@ enum NotificationType {
 }
 
 // ============================================
+// Region Schema (SRS V2 Multi-Tenancy)
+// ============================================
+
+model Region {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique // Misal: "Region A", "Region B"
+  code        String       @unique // Misal: "REG-A", "REG-B"
+  description String?
+  created_at  DateTime     @default(now())
+  updated_at  DateTime     @updatedAt
+  deleted_at  DateTime?
+
+  // Strict 1 Admin per Region (BR-TENANT-01)
+  admin       User?        @relation("RegionAdmin")
+  users       User[]       @relation("RegionUsers")
+  groups      Group[]
+  communities Community[]
+  call_logs   CallSession[]
+
+  @@map("regions")
+}
+
+// ============================================
 // User & Profile Schema
 // ============================================
 
@@ -84,7 +113,13 @@ model User {
   notifications         Notification[]
   group_join_requests   GroupJoinRequest[]
 
-  // Scoped Group Tenancy for ADMIN
+  // Region Tenancy (SRS V2)
+  region_id             Int?
+  region                Region?              @relation("RegionUsers", fields: [region_id], references: [id], onDelete: SetNull)
+  managed_region_id     Int?                 @unique
+  managed_region        Region?              @relation("RegionAdmin", fields: [managed_region_id], references: [id], onDelete: SetNull)
+
+  // Legacy Group Admin Scoping (Backward Compatibility)
   managed_group_id      Int?
   managed_group         Group?               @relation("ManagedGroupAdmin", fields: [managed_group_id], references: [id], onDelete: SetNull)
 
@@ -144,6 +179,10 @@ model Group {
   created_at          DateTime  @default(now())
   updated_at          DateTime  @updatedAt
   deleted_at          DateTime?
+
+  // Region Tenancy (SRS V2)
+  region_id           Int?
+  region              Region?            @relation(fields: [region_id], references: [id], onDelete: Cascade)
 
   creator         User               @relation("GroupCreator", fields: [created_by_id], references: [id])
   members         GroupMember[]
@@ -226,6 +265,10 @@ model Community {
   updated_at    DateTime  @updatedAt
   deleted_at    DateTime?
 
+  // Region Tenancy (SRS V2)
+  region_id     Int?
+  region        Region?           @relation(fields: [region_id], references: [id], onDelete: Cascade)
+
   creator User              @relation("CommunityCreator", fields: [created_by_id], references: [id])
   members CommunityMember[]
   groups  CommunityGroup[]
@@ -266,15 +309,20 @@ model CommunityGroup {
 // ============================================
 
 model CallSession {
-  id          Int        @id @default(autoincrement())
-  call_type   CallType   @default(DIRECT)
+  id          Int           @id @default(autoincrement())
+  call_type   CallType      @default(DIRECT)
+  media_type  CallMediaType @default(AUDIO)
   caller_id   Int
   receiver_id Int?
   group_id    Int?
-  status      CallStatus @default(COMPLETED)
-  started_at  DateTime   @default(now())
+  status      CallStatus    @default(COMPLETED)
+  started_at  DateTime      @default(now())
   ended_at    DateTime?
-  duration    Int        @default(0) // seconds
+  duration    Int           @default(0) // seconds
+
+  // Region Tenancy (SRS V2)
+  region_id   Int?
+  region      Region?       @relation(fields: [region_id], references: [id], onDelete: SetNull)
 
   caller   User   @relation("InitiatedCalls", fields: [caller_id], references: [id], onDelete: Cascade)
   receiver User?  @relation("ReceivedCalls", fields: [receiver_id], references: [id], onDelete: SetNull)

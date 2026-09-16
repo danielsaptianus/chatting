@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@common/prisma/prisma.service';
-import { CallStatus, CallType } from '@prisma/client';
+import { CallStatus, CallType, CallMediaType } from '@prisma/client';
 
 @Injectable()
 export class CallsService {
@@ -18,6 +18,8 @@ export class CallsService {
     receiverId?: number;
     groupId?: number;
     callType: CallType;
+    mediaType?: CallMediaType;
+    regionId?: number | null;
   }) {
     const callSession = await this.prisma.callSession.create({
       data: {
@@ -25,6 +27,8 @@ export class CallsService {
         receiver_id: data.receiverId || null,
         group_id: data.groupId || null,
         call_type: data.callType,
+        media_type: data.mediaType || CallMediaType.AUDIO,
+        region_id: data.regionId || null,
         status: CallStatus.MISSED, // Default until accepted
       },
       include: {
@@ -66,19 +70,22 @@ export class CallsService {
       },
     });
 
-    // Record system log message into chat history (FR-CALL-05)
+    // Record system log message into chat history (FR-CALL-05, FR-VC-04)
     try {
       let content = '';
       const durStr = this.formatDuration(duration);
+      const isVideo = session.media_type === CallMediaType.VIDEO;
+      const mediaIcon = isVideo ? '📹' : '📞';
+      const mediaLabel = isVideo ? 'Panggilan Video' : 'Panggilan Suara';
 
       if (status === CallStatus.COMPLETED) {
-        content = `📞 Panggilan Suara Selesai (${durStr})`;
+        content = `${mediaIcon} ${mediaLabel} Selesai (${durStr})`;
       } else if (status === CallStatus.REJECTED) {
-        content = `📞 Panggilan Ditolak`;
+        content = `${mediaIcon} ${mediaLabel} Ditolak`;
       } else if (status === CallStatus.MISSED) {
-        content = `📞 Panggilan Tak Terjawab`;
+        content = `${mediaIcon} ${mediaLabel} Tak Terjawab`;
       } else if (status === CallStatus.BUSY) {
-        content = `📞 Panggilan Sibuk`;
+        content = `${mediaIcon} ${mediaLabel} Sibuk`;
       }
 
       if (session.call_type === CallType.DIRECT && session.receiver_id) {
@@ -94,7 +101,7 @@ export class CallsService {
           data: {
             group_id: session.group_id,
             sender_id: session.caller_id,
-            content: `📞 Panggilan Suara Grup (${status === CallStatus.COMPLETED ? `Selesai, ${durStr}` : status})`,
+            content: `${mediaIcon} ${mediaLabel} Grup (${status === CallStatus.COMPLETED ? `Selesai, ${durStr}` : status})`,
           },
         });
       }

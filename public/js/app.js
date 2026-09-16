@@ -245,6 +245,24 @@ function setupEventListeners() {
     loadAdminUsersList();
   });
 
+  // Super Admin Region Management Modal (FR-REG-01, FR-REG-02)
+  const btnRegions = document.getElementById('btn-open-regions');
+  if (btnRegions) {
+    btnRegions.addEventListener('click', () => {
+      openAdminRegionsModal();
+    });
+  }
+
+  const formCreateRegion = document.getElementById('form-create-region');
+  if (formCreateRegion) {
+    formCreateRegion.addEventListener('submit', handleCreateRegion);
+  }
+
+  const formAssignRegionAdmin = document.getElementById('form-assign-region-admin');
+  if (formAssignRegionAdmin) {
+    formAssignRegionAdmin.addEventListener('submit', handleAssignRegionAdmin);
+  }
+
   document.getElementById('check-include-deleted').addEventListener('change', () => {
     loadAdminUsersList();
   });
@@ -367,7 +385,7 @@ function setupSocketListeners() {
   });
 
   socketClient.on('call:accepted', () => {
-    webrtcManager.updateCallStatusUI('Menghubungkan suara...');
+    webrtcManager.updateCallStatusUI('Menghubungkan media...');
   });
 
   socketClient.on('call:rejected', (data) => {
@@ -376,11 +394,24 @@ function setupSocketListeners() {
   });
 
   socketClient.on('call:ended', () => {
-    showToast('Panggilan Selesai', 'Panggilan suara telah berakhir.', 'info', '📞');
+    showToast('Panggilan Selesai', 'Panggilan telah berakhir.', 'info', '📞');
     webrtcManager.endCall(false);
   });
 
-  // BR-CALL-01: 30 seconds ring timeout handler
+  socketClient.on('call:error', (data) => {
+    showToast('Panggilan Gagal', data?.message || 'Akses panggilan ditolak.', 'error', '🚫');
+    webrtcManager.endCall(false);
+  });
+
+  socketClient.on('call:screen_share_started', () => {
+    webrtcManager.handleScreenShareStarted();
+  });
+
+  socketClient.on('call:screen_share_stopped', () => {
+    webrtcManager.handleScreenShareStopped();
+  });
+
+  // BR-CALL-01, BR-VC-02: 30 seconds ring timeout handler
   socketClient.on('call:timeout', (data) => {
     showToast('Waktu Panggilan Habis (30s)', data?.message || 'Panggilan tidak dijawab dalam 30 detik.', 'warning', '⏱️');
     webrtcManager.endCall(false);
@@ -397,6 +428,7 @@ function setupSocketListeners() {
 
   socketClient.on('group_call:user_left', (data) => {
     webrtcManager.updateParticipantCountUI(data.participantsCount);
+    webrtcManager.removeGroupVideoTile(data.socketId);
   });
 
   socketClient.on('group_call:signal', (data) => {
@@ -404,7 +436,7 @@ function setupSocketListeners() {
   });
 
   socketClient.on('group_call:error', (data) => {
-    showToast('Panggilan Grup Penuh', data.message, 'error', '👥');
+    showToast('Panggilan Grup Gagal', data.message, 'error', '👥');
   });
 }
 
@@ -492,12 +524,42 @@ function renderCurrentUser() {
   document.getElementById('current-user-name').textContent = `${firstName} ${lastName}`.trim();
   document.getElementById('current-user-role').textContent = role;
 
-  // Show Admin Panel Button if SUPER_ADMIN or ADMIN (FR-ROLE-01 - FR-ROLE-05)
+  // Region Badge in header pill
+  const regionBadge = document.getElementById('current-user-region');
+  if (regionBadge) {
+    if (role === 'SUPER_ADMIN') {
+      regionBadge.textContent = 'Global';
+      regionBadge.classList.remove('hidden');
+    } else if (user.region?.name || user.region_id) {
+      regionBadge.textContent = user.region?.name || `Region ${user.region_id}`;
+      regionBadge.classList.remove('hidden');
+    } else {
+      regionBadge.classList.add('hidden');
+    }
+  }
+
+  // Super Admin Region Management Button (FR-REG-01)
+  const regionBtn = document.getElementById('btn-open-regions');
+  if (regionBtn) {
+    if (role === 'SUPER_ADMIN') {
+      regionBtn.classList.remove('hidden');
+    } else {
+      regionBtn.classList.add('hidden');
+    }
+  }
+
+  // Show Admin Panel Button if SUPER_ADMIN, REGION_ADMIN, or ADMIN
   const adminBtn = document.getElementById('btn-open-admin');
-  const isPrivileged = role === 'SUPER_ADMIN' || role === 'ADMIN';
+  const isPrivileged = role === 'SUPER_ADMIN' || role === 'REGION_ADMIN' || role === 'ADMIN';
   if (isPrivileged) {
     adminBtn.classList.remove('hidden');
-    adminBtn.title = role === 'SUPER_ADMIN' ? 'Manajemen Pengguna (Super Admin)' : 'Manajemen Pengguna (Admin Grup)';
+    if (role === 'SUPER_ADMIN') {
+      adminBtn.title = 'Manajemen Pengguna (Super Admin)';
+    } else if (role === 'REGION_ADMIN') {
+      adminBtn.title = 'Manajemen Pengguna Wilayah (Region Admin)';
+    } else {
+      adminBtn.title = 'Manajemen Pengguna (Admin Grup)';
+    }
   } else {
     adminBtn.classList.add('hidden');
   }
@@ -1054,10 +1116,11 @@ async function selectGroupChat(groupId, communityId = null) {
     if (btnSend) btnSend.disabled = false;
   }
 
-  // Header action buttons (Panggilan, Ekspor, Tambah, Tautan, Detail)
+  // Header action buttons (Panggilan Suara, Video Call, Ekspor, Tambah, Tautan, Detail)
   const actionsContainer = document.getElementById('chat-header-actions');
   actionsContainer.innerHTML = `
-    <button class="btn btn-outline btn-sm" onclick="webrtcManager.startGroupCall(${groupId}, '${escapeHtml(group.name)}')" title="Mulai Panggilan Suara Grup">📞 Panggilan</button>
+    <button class="btn btn-outline btn-sm" onclick="webrtcManager.startGroupCall(${groupId}, '${escapeHtml(group.name)}', 'AUDIO')" title="Mulai Panggilan Suara Grup">📞 Suara</button>
+    <button class="btn btn-outline btn-sm" onclick="webrtcManager.startGroupCall(${groupId}, '${escapeHtml(group.name)}', 'VIDEO')" title="Mulai Panggilan Video Grup (Maks 8 Peserta - BR-VC-01)">📹 Video</button>
     <button class="btn btn-outline btn-sm" onclick="openExportModal('group', ${groupId})" title="Unduh Arsip Chat">📥 Ekspor</button>
     ${isStaff ? `<button class="btn btn-outline btn-sm" onclick="openAddMemberModal(${groupId})">➕ Tambah</button>` : ''}
     ${isStaff ? `<button class="btn btn-outline btn-sm" onclick="openGroupInviteModal(${groupId})">🔗 Tautan</button>` : ''}
@@ -1128,7 +1191,8 @@ async function selectPCChat(userId) {
   document.getElementById('active-chat-subtitle').textContent = contact.email;
 
   document.getElementById('chat-header-actions').innerHTML = `
-    <button class="btn btn-outline btn-sm" onclick="webrtcManager.startDirectCall(${userId}, '${escapeHtml(name)}')" title="Panggilan Suara Pribadi">📞 Panggilan</button>
+    <button class="btn btn-outline btn-sm" onclick="webrtcManager.startDirectCall(${userId}, '${escapeHtml(name)}', 'AUDIO')" title="Panggilan Suara 1-on-1">📞 Suara</button>
+    <button class="btn btn-outline btn-sm" onclick="webrtcManager.startDirectCall(${userId}, '${escapeHtml(name)}', 'VIDEO')" title="Panggilan Video 1-on-1 (WebRTC)">📹 Video</button>
     <button class="btn btn-outline btn-sm" onclick="openExportModal('pc', ${userId})" title="Unduh Arsip Chat">📥 Ekspor</button>
     <button class="btn btn-outline btn-sm" onclick="showPublicProfile(${userId})" title="Profil Publik">ℹ️ Profil</button>
   `;
@@ -2175,37 +2239,64 @@ async function openRegisterUserModal() {
   const adminNotice = document.getElementById('reg-admin-notice');
   const managedGroupWrapper = document.getElementById('group-managed-select-wrapper');
   const userGroupWrapper = document.getElementById('group-user-select-wrapper');
+  const regionWrapper = document.getElementById('region-select-wrapper');
+  const regionSelect = document.getElementById('reg-user-region');
 
   if (myRole === 'SUPER_ADMIN') {
-    // Super Admin can choose USER or ADMIN
+    // Super Admin can create USER, REGION_ADMIN, or ADMIN
     roleSelect.disabled = false;
     roleSelect.innerHTML = `
-      <option value="USER">USER (Pengguna Grup)</option>
+      <option value="USER">USER (Pengguna Wilayah/Region)</option>
+      <option value="REGION_ADMIN">REGION_ADMIN (Admin Wilayah/Region)</option>
       <option value="ADMIN">ADMIN (Admin Grup)</option>
     `;
     adminNotice.classList.add('hidden');
+    if (regionWrapper) regionWrapper.classList.remove('hidden');
+
+    // Populate region dropdown
+    try {
+      const regions = await api.getRegions();
+      if (regionSelect) {
+        regionSelect.innerHTML =
+          '<option value="">-- Pilih Wilayah / Region --</option>' +
+          (regions || [])
+            .map((r) => `<option value="${r.id}">${escapeHtml(r.name)} (${escapeHtml(r.code)})</option>`)
+            .join('');
+      }
+    } catch {}
 
     // Populate group dropdowns
     try {
       const allGroups = await api.getAllGroups();
-      const optionsHtml = '<option value="">-- Pilih Grup --</option>' +
+      const optionsHtml =
+        '<option value="">-- Pilih Grup --</option>' +
         (allGroups || []).map((g) => `<option value="${g.id}">${escapeHtml(g.name)} (#${g.id})</option>`).join('');
 
       document.getElementById('reg-managed-group').innerHTML = optionsHtml;
-      document.getElementById('reg-user-group').innerHTML = '<option value="">-- Tanpa Grup Langsung --</option>' +
+      document.getElementById('reg-user-group').innerHTML =
+        '<option value="">-- Tanpa Grup Langsung --</option>' +
         (allGroups || []).map((g) => `<option value="${g.id}">${escapeHtml(g.name)} (#${g.id})</option>`).join('');
-    } catch {
-      // Fallback
-    }
+    } catch {}
 
     handleRegRoleChange();
+  } else if (myRole === 'REGION_ADMIN') {
+    // Region Admin can only create USER in their region (FR-USER-01, FR-USER-02, BR-TENANT-02)
+    roleSelect.innerHTML = `<option value="USER" selected>USER (Pengguna Wilayah)</option>`;
+    roleSelect.disabled = true;
+    adminNotice.classList.remove('hidden');
+    adminNotice.innerHTML = `🔒 <strong>Isolasi Wilayah:</strong> Sebagai Region Admin, pengguna baru otomatis didaftarkan ke wilayah/region wewenang Anda.`;
+    if (regionWrapper) regionWrapper.classList.add('hidden');
+    if (managedGroupWrapper) managedGroupWrapper.classList.add('hidden');
+    if (userGroupWrapper) userGroupWrapper.classList.add('hidden');
   } else if (myRole === 'ADMIN') {
     // Group Admin is locked to USER only (FR-ROLE-03)
     roleSelect.innerHTML = `<option value="USER" selected>USER (Pengguna Grup)</option>`;
     roleSelect.disabled = true;
     adminNotice.classList.remove('hidden');
-    managedGroupWrapper.classList.add('hidden');
-    userGroupWrapper.classList.add('hidden');
+    adminNotice.innerHTML = `🔒 <strong>Isolasi Tenancy:</strong> Sebagai Admin Grup, pengguna baru otomatis didaftarkan ke grup wewenang Anda.`;
+    if (regionWrapper) regionWrapper.classList.add('hidden');
+    if (managedGroupWrapper) managedGroupWrapper.classList.add('hidden');
+    if (userGroupWrapper) userGroupWrapper.classList.add('hidden');
   }
 
   openModal('modal-register-user');
@@ -2218,13 +2309,20 @@ function handleRegRoleChange() {
   if (myRole === 'SUPER_ADMIN') {
     const managedGroupWrapper = document.getElementById('group-managed-select-wrapper');
     const userGroupWrapper = document.getElementById('group-user-select-wrapper');
+    const regionWrapper = document.getElementById('region-select-wrapper');
 
-    if (role === 'ADMIN') {
-      managedGroupWrapper.classList.remove('hidden');
-      userGroupWrapper.classList.add('hidden');
+    if (role === 'REGION_ADMIN') {
+      if (regionWrapper) regionWrapper.classList.remove('hidden');
+      if (managedGroupWrapper) managedGroupWrapper.classList.add('hidden');
+      if (userGroupWrapper) userGroupWrapper.classList.add('hidden');
+    } else if (role === 'ADMIN') {
+      if (regionWrapper) regionWrapper.classList.add('hidden');
+      if (managedGroupWrapper) managedGroupWrapper.classList.remove('hidden');
+      if (userGroupWrapper) userGroupWrapper.classList.add('hidden');
     } else {
-      managedGroupWrapper.classList.add('hidden');
-      userGroupWrapper.classList.remove('hidden');
+      if (regionWrapper) regionWrapper.classList.remove('hidden');
+      if (managedGroupWrapper) managedGroupWrapper.classList.add('hidden');
+      if (userGroupWrapper) userGroupWrapper.classList.remove('hidden');
     }
   }
 }
@@ -2251,7 +2349,15 @@ async function handleAdminRegisterUser(e) {
   };
 
   if (myRole === 'SUPER_ADMIN') {
-    if (role === 'ADMIN') {
+    if (role === 'REGION_ADMIN') {
+      const regionId = document.getElementById('reg-user-region')?.value;
+      if (!regionId) {
+        showToast('Validasi Gagal', 'Super Admin wajib memilih Region untuk akun Region Admin (BR-TENANT-01).', 'error', '⚠️');
+        return;
+      }
+      payload.region_id = Number(regionId);
+      payload.managed_region_id = Number(regionId);
+    } else if (role === 'ADMIN') {
       const managedGroupId = document.getElementById('reg-managed-group').value;
       if (!managedGroupId) {
         showToast('Validasi Gagal', 'Super Admin wajib menetapkan grup yang dikelola untuk akun Admin (BR-ROLE-01).', 'error', '⚠️');
@@ -2259,7 +2365,11 @@ async function handleAdminRegisterUser(e) {
       }
       payload.managed_group_id = Number(managedGroupId);
     } else if (role === 'USER') {
-      const groupId = document.getElementById('reg-user-group').value;
+      const regionId = document.getElementById('reg-user-region')?.value;
+      if (regionId) {
+        payload.region_id = Number(regionId);
+      }
+      const groupId = document.getElementById('reg-user-group')?.value;
       if (groupId) {
         payload.group_id = Number(groupId);
       }
@@ -2486,5 +2596,138 @@ async function handleCreateCommunitySubmit(e) {
     selectCommunityHub(newCommunity.id);
   } catch (err) {
     showToast('Gagal Membuat Komunitas', err.message, 'error', '❌');
+  }
+}
+
+// ==========================================================================
+// Region Management (FR-REG-01, FR-REG-02, BR-TENANT-01)
+// ==========================================================================
+async function openAdminRegionsModal() {
+  openModal('modal-admin-regions');
+  await loadAdminRegions();
+}
+
+async function loadAdminRegions() {
+  const container = document.getElementById('admin-regions-list');
+  if (!container) return;
+  container.innerHTML = '<div class="empty-state">Memuat data region...</div>';
+
+  try {
+    const regions = await api.getRegions();
+    if (!regions || regions.length === 0) {
+      container.innerHTML = '<div class="empty-state">Belum ada wilayah/region terdaftar.</div>';
+      return;
+    }
+
+    container.innerHTML = regions
+      .map((r) => {
+        const adminName = r.admin
+          ? `${r.admin.biodata?.first_name || ''} ${r.admin.biodata?.last_name || ''}`.trim() || r.admin.email
+          : '<span style="color: #f59e0b; font-style: italic;">Belum Ditugaskan</span>';
+
+        return `
+          <div class="region-item-card">
+            <div class="region-item-header">
+              <h4 class="region-item-title">${escapeHtml(r.name)}</h4>
+              <span class="region-item-code">${escapeHtml(r.code)}</span>
+            </div>
+            <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">
+              ${escapeHtml(r.description || 'Tidak ada deskripsi wilayah')}
+            </p>
+            <div class="region-item-admin">
+              🛡️ Admin: <strong>${adminName}</strong>
+            </div>
+            <div class="region-item-stats">
+              <span>👥 ${r._count?.users || 0} Pengguna</span>
+              <span>💬 ${r._count?.groups || 0} Grup</span>
+              <span>🌐 ${r._count?.communities || 0} Komunitas</span>
+            </div>
+            <button class="btn btn-outline btn-sm" style="margin-top: 4px;" onclick="openAssignRegionAdminModal(${r.id}, '${escapeHtml(r.name)}')">
+              🛡️ ${r.admin ? 'Ganti Admin Region' : 'Tugaskan Admin Region'}
+            </button>
+          </div>
+        `;
+      })
+      .join('');
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function toggleCreateRegionForm(show) {
+  const form = document.getElementById('form-create-region');
+  if (!form) return;
+  const isHidden = form.classList.contains('hidden');
+  const shouldShow = show !== undefined ? show : isHidden;
+  form.classList.toggle('hidden', !shouldShow);
+  if (shouldShow) {
+    document.getElementById('new-region-name')?.focus();
+  }
+}
+
+async function handleCreateRegion(e) {
+  e.preventDefault();
+  const name = document.getElementById('new-region-name').value.trim();
+  const code = document.getElementById('new-region-code').value.trim().toUpperCase();
+  const description = document.getElementById('new-region-desc').value.trim();
+
+  try {
+    await api.createRegion(name, code, description);
+    showToast('Region Dibuat', `Wilayah "${name}" (${code}) berhasil didaftarkan.`, 'success', '📍');
+    document.getElementById('form-create-region').reset();
+    toggleCreateRegionForm(false);
+    await loadAdminRegions();
+  } catch (err) {
+    showToast('Gagal Membuat Region', err.message, 'error', '❌');
+  }
+}
+
+async function openAssignRegionAdminModal(regionId, regionName) {
+  document.getElementById('assign-region-id').value = regionId;
+  document.getElementById('assign-region-title').textContent = `Wilayah: ${regionName} (Tepat 1 Admin - BR-TENANT-01)`;
+
+  const selectUser = document.getElementById('select-region-admin-user');
+  selectUser.innerHTML = '<option value="">Memuat daftar user...</option>';
+
+  openModal('modal-assign-region-admin');
+
+  try {
+    const users = await api.getUsers(false);
+    // Filter eligible users: not super admin
+    const eligible = (users || []).filter((u) => u.biodata?.role !== 'SUPER_ADMIN');
+    selectUser.innerHTML =
+      '<option value="">-- Pilih Pengguna untuk Dijadikan Region Admin --</option>' +
+      eligible
+        .map((u) => {
+          const uName = u.biodata ? `${u.biodata.first_name} ${u.biodata.last_name}` : u.email;
+          const currentRegion = u.region ? ` [${u.region.name}]` : '';
+          return `<option value="${u.id}">${escapeHtml(uName)} (${escapeHtml(u.email)})${currentRegion}</option>`;
+        })
+        .join('');
+  } catch (err) {
+    selectUser.innerHTML = `<option value="">Gagal memuat pengguna: ${escapeHtml(err.message)}</option>`;
+  }
+}
+
+async function handleAssignRegionAdmin(e) {
+  e.preventDefault();
+  const regionId = Number(document.getElementById('assign-region-id').value);
+  const userId = Number(document.getElementById('select-region-admin-user').value);
+
+  if (!regionId || !userId) {
+    showToast('Validasi Gagal', 'Mohon pilih pengguna yang akan ditugaskan sebagai Admin Region.', 'error', '⚠️');
+    return;
+  }
+
+  try {
+    await api.assignRegionAdmin(regionId, userId);
+    showToast('Admin Ditugaskan', 'Admin Region berhasil ditetapkan (BR-TENANT-01).', 'success', '🛡️');
+    closeModal('modal-assign-region-admin');
+    await loadAdminRegions();
+    if (state.activeTab === 'users' || !document.getElementById('modal-admin-users')?.classList.contains('hidden')) {
+      loadAdminUsersList();
+    }
+  } catch (err) {
+    showToast('Gagal Menugaskan Admin', err.message, 'error', '❌');
   }
 }

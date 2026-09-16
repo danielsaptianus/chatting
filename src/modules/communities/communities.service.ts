@@ -21,11 +21,17 @@ export class CommunitiesService {
   // FR-COM-01 & FR-COM-02: CREATE COMMUNITY + ANNOUNCEMENT SUB-GROUP
   // ==========================================
   async createCommunity(userId: number, dto: CreateCommunityDto) {
+    const creator = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { biodata: true },
+    });
+
     const community = await this.prisma.community.create({
       data: {
         name: dto.name,
         description: dto.description,
         created_by_id: userId,
+        region_id: creator?.region_id || null,
         members: {
           create: {
             user_id: userId,
@@ -42,6 +48,7 @@ export class CommunitiesService {
         name: announcementGroupName,
         description: `Saluran pengumuman resmi untuk komunitas ${dto.name}. Hanya admin yang dapat mengirim pesan.`,
         created_by_id: userId,
+        region_id: creator?.region_id || null,
         is_announcement: true,
         only_admins_can_post: true,
         members: {
@@ -119,10 +126,18 @@ export class CommunitiesService {
   // GET ALL COMMUNITIES (FOR EXPLORE / JOIN)
   // ==========================================
   async getAllCommunities(userId: number) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true, region_id: true },
+    });
+
+    const whereClause: any = { deleted_at: null };
+    if (user && user.role !== 'SUPER_ADMIN') {
+      whereClause.region_id = user.region_id ?? null;
+    }
+
     return this.prisma.community.findMany({
-      where: {
-        deleted_at: null,
-      },
+      where: whereClause,
       include: {
         creator: {
           select: { id: true, email: true, biodata: true },
@@ -218,6 +233,20 @@ export class CommunitiesService {
 
     if (!community) {
       throw new NotFoundException('Komunitas tidak ditemukan');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true, region_id: true },
+    });
+
+    if (
+      community.region_id &&
+      user &&
+      user.role !== 'SUPER_ADMIN' &&
+      user.region_id !== community.region_id
+    ) {
+      throw new ForbiddenException('Akses ditolak: Komunitas berada di wilayah/region yang berbeda.');
     }
 
     if (community.members.length > 0) {

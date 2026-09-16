@@ -47,30 +47,55 @@ export class UsersService {
 
     let targetRole: Role = dto.role || Role.USER;
     let targetManagedGroupId: number | null = null;
+    let targetManagedRegionId: number | null = null;
+    let targetRegionId: number | null = null;
     let enrollGroupId: number | null = null;
 
     if (creatorRole === Role.SUPER_ADMIN) {
       // Super Admin:
-      // - If creating ADMIN, managed_group_id is mandatory (FR-ROLE-01, BR-ROLE-01)
-      if (targetRole === Role.ADMIN) {
-        if (!dto.managed_group_id) {
-          throw new BadRequestException(
-            'Super Admin wajib menetapkan ID grup (managed_group_id) yang akan dikelola oleh Admin baru.',
-          );
+      // - If creating REGION_ADMIN (or ADMIN)
+      if (targetRole === Role.REGION_ADMIN || targetRole === Role.ADMIN) {
+        if (dto.managed_region_id) {
+          const region = await this.prisma.region.findFirst({
+            where: { id: Number(dto.managed_region_id), deleted_at: null },
+            include: { admin: true },
+          });
+
+          if (!region) {
+            throw new NotFoundException(`Region dengan ID ${dto.managed_region_id} tidak ditemukan.`);
+          }
+
+          // BR-TENANT-01: Strict 1 Admin per Region
+          if (region.admin) {
+            throw new BadRequestException(
+              `Region "${region.name}" sudah memiliki Admin (${region.admin.email}). Setiap Region hanya boleh memiliki 1 Admin (BR-TENANT-01).`,
+            );
+          }
+
+          targetManagedRegionId = Number(dto.managed_region_id);
+          targetRegionId = targetManagedRegionId;
+        } else if (dto.managed_group_id) {
+          // Legacy group admin support
+          const group = await this.prisma.group.findFirst({
+            where: { id: Number(dto.managed_group_id), deleted_at: null },
+          });
+          if (!group) {
+            throw new NotFoundException(`Grup dengan ID ${dto.managed_group_id} tidak ditemukan.`);
+          }
+          targetManagedGroupId = Number(dto.managed_group_id);
+          enrollGroupId = targetManagedGroupId;
         }
-
-        const group = await this.prisma.group.findFirst({
-          where: { id: Number(dto.managed_group_id), deleted_at: null },
-        });
-
-        if (!group) {
-          throw new NotFoundException(`Grup dengan ID ${dto.managed_group_id} tidak ditemukan.`);
-        }
-
-        targetManagedGroupId = Number(dto.managed_group_id);
-        enrollGroupId = targetManagedGroupId;
       } else if (targetRole === Role.USER) {
-        // Super Admin creating USER can optionally enroll user to a group (FR-ROLE-02)
+        // Super Admin creating USER: can assign region or group
+        if (dto.region_id) {
+          const region = await this.prisma.region.findFirst({
+            where: { id: Number(dto.region_id), deleted_at: null },
+          });
+          if (!region) {
+            throw new NotFoundException(`Region dengan ID ${dto.region_id} tidak ditemukan.`);
+          }
+          targetRegionId = Number(dto.region_id);
+        }
         if (dto.group_id) {
           const group = await this.prisma.group.findFirst({
             where: { id: Number(dto.group_id), deleted_at: null },
@@ -79,47 +104,58 @@ export class UsersService {
             throw new NotFoundException(`Grup dengan ID ${dto.group_id} tidak ditemukan.`);
           }
           enrollGroupId = Number(dto.group_id);
+          if (!targetRegionId && group.region_id) {
+            targetRegionId = group.region_id;
+          }
         }
       }
-    } else if (creatorRole === Role.ADMIN) {
-      // Group Admin (FR-ROLE-03, FR-ROLE-04, BR-ROLE-01):
+    } else if (creatorRole === Role.REGION_ADMIN || creatorRole === Role.ADMIN) {
+      // Region Admin / Group Admin (FR-USER-01, FR-USER-02, BR-TENANT-01, BR-TENANT-02):
       // - Can ONLY create USER
       if (dto.role && dto.role !== Role.USER) {
         throw new ForbiddenException(
-          'Admin Grup hanya berhak membuat akun baru dengan peran USER.',
+          'Admin Region hanya berhak membuat akun baru dengan peran USER (FR-USER-01).',
         );
       }
       targetRole = Role.USER;
 
-      // Must have managed_group_id
+      const adminRegionId = creatorUser.managed_region_id || creatorUser.region_id;
       const adminGroupId = creatorUser.managed_group_id;
-      if (!adminGroupId) {
-        throw new BadRequestException(
-          'Akun Admin Anda belum memiliki grup yang dikelola (managed_group_id).',
-        );
-      }
 
-      // Cross-Group Prevention: cannot create for other groups
-      if (dto.group_id && Number(dto.group_id) !== Number(adminGroupId)) {
-        throw new ForbiddenException(
-          'Proteksi Lintas Grup: Dilarang mendaftarkan pengguna ke luar grup wewenang Anda.',
-        );
+      if (adminRegionId) {
+        // Enforce region scoping
+        if (dto.region_id && Number(dto.region_id) !== Number(adminRegionId)) {
+          throw new ForbiddenException(
+            'Proteksi Lintas Region: Dilarang mendaftarkan pengguna ke luar region wewenang Anda (FR-USER-02, BR-TENANT-02).',
+          );
+        }
+        targetRegionId = Number(adminRegionId);
+      } else if (adminGroupId) {
+        // Fallback for legacy group-scoped admin
+        if (dto.group_id && Number(dto.group_id) !== Number(adminGroupId)) {
+          throw new ForbiddenException(
+            'Proteksi Lintas Grup: Dilarang mendaftarkan pengguna ke luar grup wewenang Anda.',
+          );
+        }
+        enrollGroupId = Number(adminGroupId);
+      } else {
+        throw new BadRequestException('Akun Admin Anda belum memiliki Region atau Grup wewenang.');
       }
-
-      enrollGroupId = Number(adminGroupId);
     } else {
       throw new ForbiddenException(
-        'Hanya Super Admin atau Admin Grup yang dapat mendaftarkan pengguna baru.',
+        'Hanya Super Admin atau Admin Region yang dapat mendaftarkan pengguna baru.',
       );
     }
 
     const hashedPassword = await PasswordUtil.hash(dto.password);
 
-    // Create user with biodata and optional managed_group_id
+    // Create user with biodata and region relations
     const user = await this.prisma.user.create({
       data: {
         email: dto.email,
         password: hashedPassword,
+        region_id: targetRegionId,
+        managed_region_id: targetManagedRegionId,
         managed_group_id: targetManagedGroupId,
         biodata: {
           create: {
@@ -134,6 +170,8 @@ export class UsersService {
       },
       include: {
         biodata: true,
+        region: { select: { id: true, name: true, code: true } },
+        managed_region: { select: { id: true, name: true, code: true } },
         managed_group: { select: { id: true, name: true } },
       },
     });
@@ -188,18 +226,48 @@ export class UsersService {
         select: {
           id: true,
           email: true,
+          region_id: true,
+          managed_region_id: true,
           managed_group_id: true,
           created_at: true,
           updated_at: true,
           deleted_at: true,
           biodata: true,
+          region: { select: { id: true, name: true, code: true } },
+          managed_region: { select: { id: true, name: true, code: true } },
           managed_group: { select: { id: true, name: true } },
         },
         orderBy: { created_at: 'desc' },
       });
     }
 
-    // Group Admin sees users in their managed group + themselves
+    // Region Admin sees users in their region
+    const userRegionId = currentUser.managed_region_id || currentUser.region_id;
+    if (userRegionId) {
+      return this.prisma.user.findMany({
+        where: {
+          region_id: userRegionId,
+          ...(includeDeleted ? {} : { deleted_at: null }),
+        },
+        select: {
+          id: true,
+          email: true,
+          region_id: true,
+          managed_region_id: true,
+          managed_group_id: true,
+          created_at: true,
+          updated_at: true,
+          deleted_at: true,
+          biodata: true,
+          region: { select: { id: true, name: true, code: true } },
+          managed_region: { select: { id: true, name: true, code: true } },
+          managed_group: { select: { id: true, name: true } },
+        },
+        orderBy: { created_at: 'desc' },
+      });
+    }
+
+    // Legacy Group Admin sees users in their managed group + themselves
     if (role === Role.ADMIN && currentUser.managed_group_id) {
       const groupMembers = await this.prisma.groupMember.findMany({
         where: { group_id: currentUser.managed_group_id },
@@ -218,23 +286,31 @@ export class UsersService {
         select: {
           id: true,
           email: true,
+          region_id: true,
+          managed_region_id: true,
           managed_group_id: true,
           created_at: true,
           updated_at: true,
           deleted_at: true,
           biodata: true,
+          region: { select: { id: true, name: true, code: true } },
+          managed_region: { select: { id: true, name: true, code: true } },
           managed_group: { select: { id: true, name: true } },
         },
         orderBy: { created_at: 'desc' },
       });
     }
 
-    // Regular users see active users
+    // Regular users see active users in their region
     return this.prisma.user.findMany({
-      where: { deleted_at: null },
+      where: {
+        deleted_at: null,
+        ...(currentUser?.region_id ? { region_id: currentUser.region_id } : {}),
+      },
       select: {
         id: true,
         email: true,
+        region_id: true,
         created_at: true,
         biodata: {
           select: {
@@ -245,6 +321,7 @@ export class UsersService {
             role: true,
           },
         },
+        region: { select: { id: true, name: true, code: true } },
       },
       orderBy: { created_at: 'desc' },
     });
@@ -256,11 +333,15 @@ export class UsersService {
       select: {
         id: true,
         email: true,
+        region_id: true,
+        managed_region_id: true,
         managed_group_id: true,
         created_at: true,
         updated_at: true,
         deleted_at: true,
         biodata: true,
+        region: { select: { id: true, name: true, code: true } },
+        managed_region: { select: { id: true, name: true, code: true } },
         managed_group: { select: { id: true, name: true } },
       },
     });
@@ -273,14 +354,15 @@ export class UsersService {
   }
 
   // =========================================================================
-  // PUBLIC PROFILE CARD (FR-BIO-04)
+  // PUBLIC PROFILE CARD (FR-BIO-04, FR-USER-02)
   // =========================================================================
 
-  async getPublicProfile(id: number) {
+  async getPublicProfile(id: number, currentUser?: any) {
     const user = await this.prisma.user.findFirst({
       where: { id, deleted_at: null },
       select: {
         id: true,
+        region_id: true,
         created_at: true,
         biodata: {
           select: {
@@ -291,11 +373,22 @@ export class UsersService {
             role: true,
           },
         },
+        region: { select: { id: true, name: true, code: true } },
       },
     });
 
     if (!user) {
       throw new NotFoundException('User profile not found');
+    }
+
+    // FR-USER-02, BR-TENANT-02: Prevent cross-region profile inspection
+    const callerRole: Role = currentUser?.role || currentUser?.biodata?.role;
+    if (callerRole && callerRole !== Role.SUPER_ADMIN && currentUser.region_id && user.region_id) {
+      if (Number(currentUser.region_id) !== Number(user.region_id)) {
+        throw new ForbiddenException(
+          'Proteksi Lintas Region: Profil pengguna berada di luar wilayah/region Anda (FR-USER-02, BR-TENANT-02)',
+        );
+      }
     }
 
     return {
@@ -305,6 +398,7 @@ export class UsersService {
       bio: user.biodata?.bio || 'Tidak ada bio.',
       avatar_url: user.biodata?.avatar_url || null,
       role: user.biodata?.role || Role.USER,
+      region: user.region,
       member_since: user.created_at,
     };
   }
@@ -461,30 +555,38 @@ export class UsersService {
 
     if (callerRole === Role.SUPER_ADMIN) {
       // Super Admin can soft-delete any user
-    } else if (callerRole === Role.ADMIN) {
-      // Group Admin can only soft-delete user in their managed group (FR-ROLE-05)
-      const adminGroupId = currentUser.managed_group_id;
-      if (!adminGroupId) {
-        throw new BadRequestException('Akun Admin Anda tidak terikat dengan grup.');
-      }
-
+    } else if (callerRole === Role.REGION_ADMIN || callerRole === Role.ADMIN) {
       if (target.biodata?.role === Role.SUPER_ADMIN) {
         throw new ForbiddenException('Dilarang menonaktifkan akun Super Admin.');
       }
 
-      const isMember = await this.prisma.groupMember.findUnique({
-        where: {
-          group_id_user_id: {
-            group_id: adminGroupId,
-            user_id: targetUserId,
+      const adminRegionId = currentUser.managed_region_id || currentUser.region_id;
+      if (adminRegionId) {
+        if (target.biodata?.role === Role.REGION_ADMIN || target.biodata?.role === Role.ADMIN) {
+          throw new ForbiddenException('Dilarang menonaktifkan akun Admin lain.');
+        }
+        if (Number(target.region_id) !== Number(adminRegionId)) {
+          throw new ForbiddenException(
+            'Proteksi Lintas Region: Anda hanya dapat menonaktifkan pengguna di dalam region wewenang Anda (FR-USER-02, BR-TENANT-02).',
+          );
+        }
+      } else if (currentUser.managed_group_id) {
+        // Fallback: Group Admin can only soft-delete user in their managed group (FR-ROLE-05)
+        const adminGroupId = currentUser.managed_group_id;
+        const isMember = await this.prisma.groupMember.findUnique({
+          where: {
+            group_id_user_id: {
+              group_id: adminGroupId,
+              user_id: targetUserId,
+            },
           },
-        },
-      });
+        });
 
-      if (!isMember) {
-        throw new ForbiddenException(
-          'Proteksi Lintas Grup: Anda hanya dapat menonaktifkan pengguna di dalam grup yang Anda kelola.',
-        );
+        if (!isMember) {
+          throw new ForbiddenException(
+            'Proteksi Lintas Grup: Anda hanya dapat menonaktifkan pengguna di dalam grup yang Anda kelola.',
+          );
+        }
       }
     } else {
       throw new ForbiddenException('Akses ditolak: Hanya admin yang dapat menonaktifkan pengguna.');

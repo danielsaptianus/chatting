@@ -38,6 +38,14 @@ export class CreateUserDto {
   @IsOptional()
   bio?: string;
 
+  @ApiProperty({ example: 1, required: false, description: 'Region ID for Region Tenancy' })
+  @IsOptional()
+  region_id?: number;
+
+  @ApiProperty({ example: 1, required: false, description: 'Managed Region ID if role is REGION_ADMIN' })
+  @IsOptional()
+  managed_region_id?: number;
+
   @ApiProperty({ example: 1, required: false, description: 'Target group ID if role is ADMIN (Super Admin only)' })
   @IsOptional()
   managed_group_id?: number;

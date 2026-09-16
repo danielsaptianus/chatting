@@ -24,6 +24,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { HealthModule } from './modules/health/health.module';
 import { CommunitiesModule } from './modules/communities/communities.module';
 import { CallsModule } from './modules/calls/calls.module';
+import { RegionsModule } from './modules/regions/regions.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { CallsModule } from './modules/calls/calls.module';
     HealthModule,
     CommunitiesModule,
     CallsModule,
+    RegionsModule,
   ],
   providers: [
     // Global guards
