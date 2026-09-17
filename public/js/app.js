@@ -2731,3 +2731,121 @@ async function handleAssignRegionAdmin(e) {
     showToast('Gagal Menugaskan Admin', err.message, 'error', '❌');
   }
 }
+
+// ==========================================================================
+// Call History Modal (FR-CALL-05, FR-VC-04)
+// ==========================================================================
+async function openCallHistoryModal() {
+  const container = document.getElementById('call-history-list');
+  openModal('modal-call-history');
+  if (!container) return;
+
+  container.innerHTML = '<div class="loading-spinner-wrapper"><span class="spinner"></span></div>';
+
+  try {
+    const history = await api.getCallHistory();
+    if (!history || history.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state" style="padding: 24px; text-align: center;">
+          <div style="font-size: 2rem; margin-bottom: 8px;">📞</div>
+          <p>Belum ada riwayat panggilan.</p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = history
+      .map((call) => {
+        const isCaller = call.caller_id === state.currentUser?.id;
+        const isVideo = call.media_type === 'VIDEO';
+        const isGroup = call.call_type === 'GROUP';
+
+        let otherPartyName = 'Pengguna';
+        let otherPartyId = null;
+
+        if (isGroup) {
+          otherPartyName = call.group?.name || 'Panggilan Grup';
+        } else {
+          const target = isCaller ? call.receiver : call.caller;
+          otherPartyId = target?.id;
+          otherPartyName = target?.biodata
+            ? `${target.biodata.first_name} ${target.biodata.last_name}`
+            : target?.email || 'Pengguna';
+        }
+
+        // Direction & icon
+        const icon = isVideo ? '📹' : '📞';
+        let directionLabel = '';
+        if (isGroup) {
+          directionLabel = `👥 Grup: ${escapeHtml(otherPartyName)}`;
+        } else if (isCaller) {
+          directionLabel = `↗️ Ke: ${escapeHtml(otherPartyName)}`;
+        } else {
+          directionLabel = `↙️ Dari: ${escapeHtml(otherPartyName)}`;
+        }
+
+        // Status badge
+        let statusBadge = '';
+        if (call.status === 'COMPLETED') {
+          const mins = Math.floor((call.duration || 0) / 60).toString().padStart(2, '0');
+          const secs = ((call.duration || 0) % 60).toString().padStart(2, '0');
+          statusBadge = `<span class="call-status-badge call-status-completed">Selesai (${mins}:${secs})</span>`;
+        } else if (call.status === 'MISSED') {
+          statusBadge = `<span class="call-status-badge call-status-missed">Tak Terjawab</span>`;
+        } else if (call.status === 'REJECTED') {
+          statusBadge = `<span class="call-status-badge call-status-rejected">Ditolak</span>`;
+        } else {
+          statusBadge = `<span class="call-status-badge">${call.status}</span>`;
+        }
+
+        // Date time
+        const dateStr = call.started_at
+          ? new Date(call.started_at).toLocaleString([], {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            })
+          : '';
+
+        // Call back action
+        let actionBtn = '';
+        if (!isGroup && otherPartyId) {
+          actionBtn = `
+            <button class="btn btn-outline btn-sm" onclick="closeModal('modal-call-history'); webrtcManager.startDirectCall(${otherPartyId}, '${escapeHtml(otherPartyName)}', '${call.media_type || 'AUDIO'}')" title="Panggil Kembali">
+              ${icon} Panggil
+            </button>
+          `;
+        } else if (isGroup && call.group_id) {
+          actionBtn = `
+            <button class="btn btn-outline btn-sm" onclick="closeModal('modal-call-history'); webrtcManager.startGroupCall(${call.group_id}, '${escapeHtml(otherPartyName)}', '${call.media_type || 'AUDIO'}')" title="Gabung Kembali">
+              ${icon} Gabung
+            </button>
+          `;
+        }
+
+        return `
+          <div class="call-history-item">
+            <div class="call-history-left">
+              <div class="call-history-icon">${icon}</div>
+              <div class="call-history-info">
+                <div class="call-history-name">${directionLabel}</div>
+                <div class="call-history-sub">
+                  ${statusBadge}
+                  <span>•</span>
+                  <span>${dateStr}</span>
+                </div>
+              </div>
+            </div>
+            <div class="call-history-actions">
+              ${actionBtn}
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state">Gagal memuat riwayat: ${escapeHtml(err.message)}</div>`;
+  }
+}

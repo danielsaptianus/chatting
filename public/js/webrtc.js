@@ -88,6 +88,66 @@ class WebRTCManager {
   }
 
   // =========================================================================
+  // Synthetic Media Fallback (for devices without mic/camera or test environments)
+  // =========================================================================
+  createSyntheticMediaStream(withVideo = false) {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return null;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const dst = ctx.createMediaStreamDestination();
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      osc.connect(gain);
+      gain.connect(dst);
+      osc.start();
+
+      const combinedStream = dst.stream;
+
+      if (withVideo) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 640;
+        canvas.height = 480;
+        const cCtx = canvas.getContext('2d');
+
+        let angle = 0;
+        const drawPlaceholder = () => {
+          cCtx.fillStyle = '#0f172a';
+          cCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+          cCtx.save();
+          cCtx.translate(canvas.width / 2, canvas.height / 2);
+          cCtx.beginPath();
+          cCtx.arc(0, 0, 70 + Math.sin(angle) * 8, 0, Math.PI * 2);
+          cCtx.fillStyle = '#6366f1';
+          cCtx.fill();
+
+          cCtx.fillStyle = '#ffffff';
+          cCtx.font = 'bold 28px sans-serif';
+          cCtx.textAlign = 'center';
+          cCtx.textBaseline = 'middle';
+          cCtx.fillText('📹 Video Live', 0, 0);
+          cCtx.restore();
+
+          angle += 0.05;
+        };
+
+        setInterval(drawPlaceholder, 100);
+        const canvasStream = canvas.captureStream ? canvas.captureStream(15) : null;
+        if (canvasStream && canvasStream.getVideoTracks().length > 0) {
+          combinedStream.addTrack(canvasStream.getVideoTracks()[0]);
+        }
+      }
+
+      return combinedStream;
+    } catch (e) {
+      console.warn('Failed to create synthetic media stream:', e);
+      return null;
+    }
+  }
+
+  // =========================================================================
   // Local Media Access (Audio & Video)
   // =========================================================================
   async getLocalMedia(withVideo = false) {
@@ -96,12 +156,15 @@ class WebRTCManager {
       if (!withVideo || hasVideoTrack) {
         return this.localStream;
       }
-      // If video requested but current stream only has audio, stop and recreate
       this.localStream.getTracks().forEach((t) => t.stop());
       this.localStream = null;
     }
 
     try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('navigator.mediaDevices tidak tersedia di browser ini.');
+      }
+
       if (withVideo) {
         try {
           this.localStream = await navigator.mediaDevices.getUserMedia({
@@ -138,7 +201,18 @@ class WebRTCManager {
 
       return this.localStream;
     } catch (err) {
-      console.error('Error accessing microphone/camera:', err);
+      console.warn('Physical media access unavailable, attempting synthetic fallback:', err);
+      const synthetic = this.createSyntheticMediaStream(withVideo);
+      if (synthetic) {
+        this.localStream = synthetic;
+        showToast(
+          'Simulasi Media Digunakan',
+          'Mikrofon/kamera fisik tidak terdeteksi atau izin belum diberikan. Panggilan tetap berjalan dengan simulasi media.',
+          'info',
+          '🎙️',
+        );
+        return this.localStream;
+      }
       throw new Error('Tidak dapat mengakses perangkat media (mikrofon/kamera). Mohon periksa izin browser.');
     }
   }
@@ -152,6 +226,7 @@ class WebRTCManager {
       return;
     }
 
+    const numReceiverId = Number(receiverId);
     this.mediaType = mediaType;
 
     try {
@@ -160,6 +235,15 @@ class WebRTCManager {
       showToast('Akses Media Gagal', err.message, 'error', '🎙️');
       return;
     }
+
+    this.currentCall = {
+      callId: null,
+      type: 'DIRECT',
+      targetId: numReceiverId,
+      targetName: receiverName,
+      status: 'calling',
+      mediaType: this.mediaType,
+    };
 
     // Show active call dialog in "Calling..." state
     this.showActiveCallUI({
@@ -177,7 +261,7 @@ class WebRTCManager {
     socketClient.socket.emit(
       'call:initiate',
       {
-        receiverId,
+        receiverId: numReceiverId,
         callerName: myName,
         mediaType: this.mediaType,
       },
@@ -188,15 +272,14 @@ class WebRTCManager {
           return;
         }
 
-        if (response?.callId) {
-          this.currentCall = {
-            callId: response.callId,
-            type: 'DIRECT',
-            targetId: receiverId,
-            targetName: receiverName,
-            status: 'calling',
-            mediaType: this.mediaType,
-          };
+        if (response?.error) {
+          showToast('Panggilan Gagal', response.error, 'error', '❌');
+          this.endCall(false);
+          return;
+        }
+
+        if (response?.callId && this.currentCall) {
+          this.currentCall.callId = response.callId;
         }
       },
     );
@@ -243,7 +326,7 @@ class WebRTCManager {
       this.currentCall = {
         callId: data.callId,
         type: 'DIRECT',
-        targetId: data.callerId,
+        targetId: Number(data.callerId),
         targetName: data.callerName,
         status: 'connecting',
         mediaType: this.mediaType,
@@ -268,7 +351,7 @@ class WebRTCManager {
       await pc.setLocalDescription(offer);
 
       socketClient.socket.emit('call:signal', {
-        targetUserId: data.callerId,
+        targetUserId: Number(data.callerId),
         signal: { type: 'offer', sdp: offer },
       });
     } catch (err) {
@@ -295,17 +378,23 @@ class WebRTCManager {
   // Peer Connection Helper (Audio + Video Tracks)
   // =========================================================================
   createPeerConnection(targetKey, isGroup = false) {
-    if (this.peerConnections.has(targetKey)) {
-      this.peerConnections.get(targetKey).close();
+    const key = String(targetKey);
+    if (this.peerConnections.has(key)) {
+      try {
+        this.peerConnections.get(key).close();
+      } catch (e) {}
     }
 
     const pc = new RTCPeerConnection(this.rtcConfig);
-    this.peerConnections.set(targetKey, pc);
+    pc._iceCandidatesQueue = [];
+    this.peerConnections.set(key, pc);
 
     // Add local tracks (Audio + Video)
     if (this.localStream) {
       this.localStream.getTracks().forEach((track) => {
-        pc.addTrack(track, this.localStream);
+        try {
+          pc.addTrack(track, this.localStream);
+        } catch (e) {}
       });
     }
 
@@ -314,12 +403,12 @@ class WebRTCManager {
       if (event.candidate) {
         if (isGroup) {
           socketClient.socket.emit('group_call:signal', {
-            targetSocketId: targetKey,
+            targetSocketId: key,
             signal: { type: 'candidate', candidate: event.candidate },
           });
         } else {
           socketClient.socket.emit('call:signal', {
-            targetUserId: targetKey,
+            targetUserId: Number(key) || key,
             signal: { type: 'candidate', candidate: event.candidate },
           });
         }
@@ -329,15 +418,17 @@ class WebRTCManager {
     // Remote Stream Handler
     pc.ontrack = (event) => {
       const stream = event.streams[0];
+      if (!stream) return;
 
       // Audio playback
-      let audio = this.remoteAudios.get(targetKey);
+      let audio = this.remoteAudios.get(key);
       if (!audio) {
         audio = new Audio();
         audio.autoplay = true;
-        this.remoteAudios.set(targetKey, audio);
+        this.remoteAudios.set(key, audio);
       }
       audio.srcObject = stream;
+      audio.play().catch((e) => console.debug('Audio play policy caught:', e));
 
       // Video playback if in video mode
       if (this.mediaType === 'VIDEO') {
@@ -346,10 +437,11 @@ class WebRTCManager {
           const fallback = document.getElementById('remote-video-fallback');
           if (remoteVideo) {
             remoteVideo.srcObject = stream;
+            remoteVideo.play().catch((e) => console.debug('Video play policy caught:', e));
             if (fallback) fallback.classList.add('hidden');
           }
         } else {
-          this.renderGroupVideoTile(targetKey, stream);
+          this.renderGroupVideoTile(key, stream);
         }
       }
     };
@@ -358,8 +450,8 @@ class WebRTCManager {
       if (pc.connectionState === 'connected') {
         this.startCallTimer();
         this.updateCallStatusUI('Terhubung');
-      } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-        this.endCall(false);
+      } else if (pc.connectionState === 'failed') {
+        console.warn(`Peer connection failed with ${key}`);
       }
     };
 
@@ -367,30 +459,57 @@ class WebRTCManager {
   }
 
   // =========================================================================
-  // WebRTC Signal Dispatcher
+  // WebRTC Signal Dispatcher (with ICE Candidate Queueing)
   // =========================================================================
   async handleSignal(senderId, signal) {
-    let pc = this.peerConnections.get(senderId);
+    const key = String(senderId);
+    let pc = this.peerConnections.get(key);
     if (!pc) {
-      pc = this.createPeerConnection(senderId);
+      pc = this.createPeerConnection(key);
     }
 
     if (signal.type === 'offer') {
       await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+
+      // Drain queued ICE candidates that arrived before remoteDescription
+      if (pc._iceCandidatesQueue && pc._iceCandidatesQueue.length > 0) {
+        for (const cand of pc._iceCandidatesQueue) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(cand));
+          } catch (e) {}
+        }
+        pc._iceCandidatesQueue = [];
+      }
+
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
       socketClient.socket.emit('call:signal', {
-        targetUserId: senderId,
+        targetUserId: Number(key) || key,
         signal: { type: 'answer', sdp: answer },
       });
     } else if (signal.type === 'answer') {
       await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+
+      // Drain queued ICE candidates
+      if (pc._iceCandidatesQueue && pc._iceCandidatesQueue.length > 0) {
+        for (const cand of pc._iceCandidatesQueue) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(cand));
+          } catch (e) {}
+        }
+        pc._iceCandidatesQueue = [];
+      }
     } else if (signal.type === 'candidate' && signal.candidate) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
-      } catch (e) {
-        console.warn('Error adding ICE candidate:', e);
+      if (!pc.remoteDescription) {
+        if (!pc._iceCandidatesQueue) pc._iceCandidatesQueue = [];
+        pc._iceCandidatesQueue.push(signal.candidate);
+      } else {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+        } catch (e) {
+          console.warn('Error adding ICE candidate:', e);
+        }
       }
     }
   }
@@ -399,6 +518,7 @@ class WebRTCManager {
   // Group Call Flow (FR-CALL-02, BR-VC-01: Max 8 participants)
   // =========================================================================
   async startGroupCall(groupId, groupName, mediaType = 'AUDIO') {
+    const numGroupId = Number(groupId);
     this.mediaType = mediaType;
 
     try {
@@ -406,7 +526,7 @@ class WebRTCManager {
 
       this.currentCall = {
         type: 'GROUP',
-        groupId,
+        groupId: numGroupId,
         groupName,
         status: 'joining',
         mediaType: this.mediaType,
@@ -425,7 +545,7 @@ class WebRTCManager {
 
       socketClient.socket.emit(
         'group_call:join',
-        { groupId, userName: myName, mediaType: this.mediaType },
+        { groupId: numGroupId, userName: myName, mediaType: this.mediaType },
         async (response) => {
           if (response?.error === 'REGION_MISMATCH') {
             showToast('Akses Ditolak', 'Grup berada di wilayah/region yang berbeda (BR-TENANT-02).', 'error', '🚫');
@@ -465,26 +585,51 @@ class WebRTCManager {
   }
 
   async handleGroupSignal(senderSocketId, signal) {
-    let pc = this.peerConnections.get(senderSocketId);
+    const key = String(senderSocketId);
+    let pc = this.peerConnections.get(key);
     if (!pc) {
-      pc = this.createPeerConnection(senderSocketId, true);
+      pc = this.createPeerConnection(key, true);
     }
 
     if (signal.type === 'offer') {
       await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+
+      if (pc._iceCandidatesQueue && pc._iceCandidatesQueue.length > 0) {
+        for (const cand of pc._iceCandidatesQueue) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(cand));
+          } catch (e) {}
+        }
+        pc._iceCandidatesQueue = [];
+      }
+
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
       socketClient.socket.emit('group_call:signal', {
-        targetSocketId: senderSocketId,
+        targetSocketId: key,
         signal: { type: 'answer', sdp: answer },
       });
     } else if (signal.type === 'answer') {
       await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+
+      if (pc._iceCandidatesQueue && pc._iceCandidatesQueue.length > 0) {
+        for (const cand of pc._iceCandidatesQueue) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(cand));
+          } catch (e) {}
+        }
+        pc._iceCandidatesQueue = [];
+      }
     } else if (signal.type === 'candidate' && signal.candidate) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
-      } catch (e) {}
+      if (!pc.remoteDescription) {
+        if (!pc._iceCandidatesQueue) pc._iceCandidatesQueue = [];
+        pc._iceCandidatesQueue.push(signal.candidate);
+      } else {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+        } catch (e) {}
+      }
     }
   }
 

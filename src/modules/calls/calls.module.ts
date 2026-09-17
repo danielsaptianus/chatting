@@ -5,10 +5,12 @@ import { CallsService } from './calls.service';
 import { CallsGateway } from './calls.gateway';
 import { CallsController } from './controllers/v1/calls.controller';
 import { PrismaModule } from '@common/prisma/prisma.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     PrismaModule,
+    NotificationsModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({

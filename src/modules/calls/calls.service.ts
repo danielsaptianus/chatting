@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@common/prisma/prisma.service';
 import { CallStatus, CallType, CallMediaType } from '@prisma/client';
+import { NotificationsGateway } from '../notifications/notifications.gateway';
 
 @Injectable()
 export class CallsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsGateway: NotificationsGateway,
+  ) {}
 
   // Format seconds to MM:SS
   private formatDuration(seconds: number): string {
@@ -89,21 +93,38 @@ export class CallsService {
       }
 
       if (session.call_type === CallType.DIRECT && session.receiver_id) {
-        await this.prisma.directMessage.create({
+        const directMsg = await this.prisma.directMessage.create({
           data: {
             sender_id: session.caller_id,
             receiver_id: session.receiver_id,
             content,
           },
+          include: {
+            sender: {
+              select: { id: true, email: true, biodata: true },
+            },
+          },
         });
+
+        // Broadcast to both caller and receiver so chat updates in real time
+        this.notificationsGateway.sendToUser(session.caller_id, 'pc_message', directMsg);
+        this.notificationsGateway.sendToUser(session.receiver_id, 'pc_message', directMsg);
       } else if (session.call_type === CallType.GROUP && session.group_id) {
-        await this.prisma.groupMessage.create({
+        const groupMsg = await this.prisma.groupMessage.create({
           data: {
             group_id: session.group_id,
             sender_id: session.caller_id,
             content: `${mediaIcon} ${mediaLabel} Grup (${status === CallStatus.COMPLETED ? `Selesai, ${durStr}` : status})`,
           },
+          include: {
+            sender: {
+              select: { id: true, email: true, biodata: true },
+            },
+          },
         });
+
+        // Broadcast to group room
+        this.notificationsGateway.sendToGroup(session.group_id, 'group_message', groupMsg);
       }
     } catch (e) {
       // Ignore message insert errors

@@ -123,6 +123,11 @@
           <span>👥 Kelola User</span>
         </button>
 
+        <!-- Call History Button -->
+        <button id="btn-open-call-history" class="btn-icon btn-notification" title="Riwayat Panggilan" onclick="openCallHistoryModal()">
+          📞
+        </button>
+
         <!-- Notification Bell -->
         <div class="notification-wrapper">
           <button id="btn-notification-bell" class="btn-icon btn-notification" title="Notifikasi">
@@ -790,6 +795,24 @@
         <button id="btn-call-end" class="btn btn-danger btn-sm" onclick="webrtcManager.endCall()" title="Akhiri Panggilan">
           <span>📞 Akhiri</span>
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Call History (Riwayat Panggilan FR-CALL-05, FR-VC-04) -->
+  <div id="modal-call-history" class="modal-overlay hidden" style="z-index: 99;">
+    <div class="modal-dialog glass-panel" style="max-width: 540px; width: 92%;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.25rem;">📞</span>
+          <h3>Riwayat Panggilan</h3>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-call-history')">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 12px 16px; max-height: 60vh; overflow-y: auto;">
+        <div id="call-history-list" class="call-history-container">
+          <div class="loading-spinner-wrapper"><span class="spinner"></span></div>
+        </div>
       </div>
     </div>
   </div>
