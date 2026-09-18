@@ -27,7 +27,11 @@ class WebRTCManager {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
       ],
+      iceCandidatePoolSize: 10,
     };
   }
 
@@ -148,7 +152,7 @@ class WebRTCManager {
   }
 
   // =========================================================================
-  // Local Media Access (Audio & Video)
+  // Local Media Access (Audio & Video) - Multi-Tier Mobile Fallback
   // =========================================================================
   async getLocalMedia(withVideo = false) {
     if (this.localStream) {
@@ -162,10 +166,11 @@ class WebRTCManager {
 
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('navigator.mediaDevices tidak tersedia di browser ini.');
+        throw new Error('navigator.mediaDevices tidak tersedia. Pastikan website dibuka via HTTPS.');
       }
 
       if (withVideo) {
+        // Tier 1: Try HD front-facing camera
         try {
           this.localStream = await navigator.mediaDevices.getUserMedia({
             audio: {
@@ -179,14 +184,23 @@ class WebRTCManager {
               facingMode: 'user',
             },
           });
-        } catch (videoErr) {
-          console.warn('Failed to access camera, falling back to audio-only:', videoErr);
-          showToast('Kamera Tidak Ditemukan', 'Melanjutkan dengan panggilan suara saja.', 'warning', '🎙️');
-          this.mediaType = 'AUDIO';
-          this.localStream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true },
-            video: false,
-          });
+        } catch (hdErr) {
+          console.warn('HD camera constraint failed, falling back to basic camera:', hdErr);
+          // Tier 2: Try basic camera without strict resolution (crucial for mobile phones)
+          try {
+            this.localStream = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+              video: true,
+            });
+          } catch (basicVideoErr) {
+            console.warn('Basic camera failed, falling back to audio-only:', basicVideoErr);
+            showToast('Kamera Tidak Dapat Dibuka', 'Melanjutkan dengan panggilan suara saja.', 'warning', '🎙️');
+            this.mediaType = 'AUDIO';
+            this.localStream = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+              video: false,
+            });
+          }
         }
       } else {
         this.localStream = await navigator.mediaDevices.getUserMedia({
@@ -201,13 +215,32 @@ class WebRTCManager {
 
       return this.localStream;
     } catch (err) {
-      console.warn('Physical media access unavailable, attempting synthetic fallback:', err);
+      console.warn('Physical media access unavailable:', err);
+
+      // Mobile user guidance based on exact error
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        showToast(
+          'Izin Kamera/Mic Diblokir',
+          'Akses kamera diblokir oleh setelan browser HP. Ketuk ikon gembok di address bar dan ubah ke "Izinkan".',
+          'error',
+          '🚫',
+        );
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        showToast(
+          'Kamera Sedang Dipakai',
+          'Kamera sedang digunakan aplikasi lain (WhatsApp/Instagram/Kamera). Tutup aplikasi lain terlebih dahulu.',
+          'error',
+          '📷',
+        );
+      }
+
+      // Tier 3: Synthetic media fallback for restricted/test environments
       const synthetic = this.createSyntheticMediaStream(withVideo);
       if (synthetic) {
         this.localStream = synthetic;
         showToast(
           'Simulasi Media Digunakan',
-          'Mikrofon/kamera fisik tidak terdeteksi atau izin belum diberikan. Panggilan tetap berjalan dengan simulasi media.',
+          'Kamera fisik tidak dapat diakses langsung. Panggilan tetap berjalan dengan simulasi media.',
           'info',
           '🎙️',
         );
@@ -563,6 +596,10 @@ class WebRTCManager {
           this.updateCallStatusUI('Terhubung');
           this.updateParticipantCountUI(response?.participantsCount || 1);
 
+          if (typeof renderActiveGroupCallBanner === 'function' && typeof currentActiveGroupCall !== 'undefined' && currentActiveGroupCall) {
+            renderActiveGroupCallBanner({ ...currentActiveGroupCall, participantsCount: response?.participantsCount || 1, isActive: true });
+          }
+
           // Connect to existing participants
           if (response?.participants) {
             for (const p of response.participants) {
@@ -886,6 +923,10 @@ class WebRTCManager {
 
     if (typeof loadChatMessages === 'function' && state.activeChat) {
       loadChatMessages();
+    }
+
+    if (typeof renderActiveGroupCallBanner === 'function' && typeof currentActiveGroupCall !== 'undefined' && currentActiveGroupCall) {
+      renderActiveGroupCallBanner(currentActiveGroupCall);
     }
   }
 

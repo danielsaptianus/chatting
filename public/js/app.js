@@ -438,6 +438,121 @@ function setupSocketListeners() {
   socketClient.on('group_call:error', (data) => {
     showToast('Panggilan Grup Gagal', data.message, 'error', '👥');
   });
+
+  // Active Group Call Live Updates
+  socketClient.on('group_call:started', (data) => {
+    if (state.activeChat?.type === 'group' && Number(state.activeChat.id) === Number(data.groupId)) {
+      renderActiveGroupCallBanner({ ...data, isActive: true });
+    }
+  });
+
+  socketClient.on('group_call:notification', (data) => {
+    const isCurrentGroup = state.activeChat?.type === 'group' && Number(state.activeChat.id) === Number(data.groupId);
+    if (!isCurrentGroup) {
+      showToast(
+        `Panggilan Grup (${data.mediaType === 'VIDEO' ? 'Video' : 'Suara'})`,
+        `${data.initiatorName || 'Seseorang'} memulai panggilan di ${data.groupName}. Buka grup untuk bergabung!`,
+        'info',
+        data.mediaType === 'VIDEO' ? '📹' : '📞',
+        7000,
+      );
+    }
+  });
+
+  socketClient.on('group_call:status_updated', (data) => {
+    if (state.activeChat?.type === 'group' && Number(state.activeChat.id) === Number(data.groupId)) {
+      if (data.isActive) {
+        renderActiveGroupCallBanner(data);
+      } else {
+        hideActiveGroupCallBanner();
+      }
+    }
+  });
+
+  socketClient.on('group_call:ended', (data) => {
+    if (state.activeChat?.type === 'group' && Number(state.activeChat.id) === Number(data.groupId)) {
+      hideActiveGroupCallBanner();
+      showToast('Panggilan Selesai', 'Panggilan grup telah berakhir.', 'info', '📞');
+    }
+  });
+}
+
+// ==========================================================================
+// Active Group Call Live Banner Manager
+// ==========================================================================
+let currentActiveGroupCall = null;
+
+function renderActiveGroupCallBanner(callData) {
+  const banner = document.getElementById('active-group-call-banner');
+  if (!banner) return;
+
+  if (!callData || !callData.isActive) {
+    banner.classList.add('hidden');
+    currentActiveGroupCall = null;
+    return;
+  }
+
+  currentActiveGroupCall = callData;
+  const isVideo = (callData.mediaType || '').toUpperCase() === 'VIDEO';
+  const icon = isVideo ? '📹' : '📞';
+  const label = isVideo ? 'Video' : 'Suara';
+  const count = callData.participantsCount || 1;
+  const isFull = count >= 8;
+
+  const iconEl = document.getElementById('call-banner-icon');
+  const titleEl = document.getElementById('call-banner-title');
+  const metaEl = document.getElementById('call-banner-meta');
+  const btnJoin = document.getElementById('btn-banner-join-call');
+
+  if (iconEl) iconEl.textContent = icon;
+  if (titleEl) {
+    titleEl.textContent = `Panggilan ${label} Grup Sedang Berlangsung`;
+  }
+  if (metaEl) {
+    const initiator = callData.initiatorName ? `Dimulai oleh ${escapeHtml(callData.initiatorName)} • ` : '';
+    metaEl.textContent = `${initiator}${count}/8 Peserta aktif`;
+  }
+
+  if (btnJoin) {
+    // If current user is already in this call
+    const isAlreadyInCall =
+      webrtcManager.currentCall &&
+      webrtcManager.currentCall.type === 'GROUP' &&
+      Number(webrtcManager.currentCall.groupId) === Number(callData.groupId);
+
+    if (isAlreadyInCall) {
+      btnJoin.disabled = true;
+      btnJoin.innerHTML = '<span>📞 Anda Sedang Terhubung</span>';
+      btnJoin.className = 'btn btn-outline btn-sm';
+    } else if (isFull) {
+      btnJoin.disabled = true;
+      btnJoin.innerHTML = '<span>👥 Panggilan Penuh (8/8)</span>';
+      btnJoin.className = 'btn btn-outline btn-sm';
+    } else {
+      btnJoin.disabled = false;
+      btnJoin.innerHTML = `<span>🟢 Gabung ${label}</span>`;
+      btnJoin.className = 'btn btn-success btn-sm btn-join-call';
+    }
+  }
+
+  banner.classList.remove('hidden');
+}
+
+function hideActiveGroupCallBanner() {
+  const banner = document.getElementById('active-group-call-banner');
+  if (banner) banner.classList.add('hidden');
+  currentActiveGroupCall = null;
+}
+
+function checkActiveGroupCall(groupId) {
+  if (!socketClient || !socketClient.socket || !socketClient.connected) return;
+  socketClient.socket.emit('group_call:get_active', { groupId }, (response) => {
+    if (response && response.isActive) {
+      renderActiveGroupCallBanner(response);
+    } else {
+      hideActiveGroupCallBanner();
+    }
+  });
 }
 
 // ==========================================================================
@@ -1130,11 +1245,15 @@ async function selectGroupChat(groupId, communityId = null) {
   // Render info drawer
   renderGroupInfoDrawer(group);
 
+  // Check active group call and display live banner if running
+  checkActiveGroupCall(groupId);
+
   // Fetch and display messages
   await loadChatMessages();
 }
 
 async function selectPCChat(userId) {
+  hideActiveGroupCallBanner();
   let contact = state.conversations.find((u) => u.id === userId);
   if (!contact) {
     // If not in conversations, fetch from cache or API

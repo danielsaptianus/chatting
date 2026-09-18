@@ -14,6 +14,15 @@ import { CallsService } from './calls.service';
 import { PrismaService } from '@common/prisma/prisma.service';
 import { CallMediaType, CallStatus, CallType } from '@prisma/client';
 
+interface GroupCallSessionState {
+  groupId: number;
+  groupName: string;
+  initiatorName: string;
+  mediaType: 'AUDIO' | 'VIDEO';
+  startedAt: Date;
+  callSessionId?: number;
+}
+
 @WebSocketGateway({
   cors: { origin: '*' },
   namespace: 'ws',
@@ -29,6 +38,9 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     number,
     Map<string, { userId: number; userName: string; mediaType?: string }>
   >();
+
+  // In-memory track active group calls metadata: groupId -> GroupCallSessionState
+  private activeGroupCalls = new Map<number, GroupCallSessionState>();
 
   // Track pending 1-on-1 call timeouts: callId -> NodeJS.Timeout (BR-CALL-01, BR-VC-02: 30s ring limit)
   private callTimeouts = new Map<number, NodeJS.Timeout>();
@@ -84,26 +96,61 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  handleDisconnect(client: Socket) {
-    // Check if client was in any group calls and clean up
-    this.groupCallParticipants.forEach((participants, groupId) => {
-      if (participants.has(client.id)) {
-        const info = participants.get(client.id);
-        participants.delete(client.id);
-        this.logger.log(`Client ${client.id} (User ${info?.userId}) left group_call_${groupId}`);
+  private async cleanupGroupCallParticipant(groupId: number, socketId: string, userId: number | null) {
+    const participants = this.groupCallParticipants.get(groupId);
+    if (!participants || !participants.has(socketId)) return;
 
-        this.server.to(`group_call_${groupId}`).emit('group_call:user_left', {
-          userId: info?.userId,
-          socketId: client.id,
-          participantsCount: participants.size,
-        });
-        this.server.to(`group_${groupId}`).emit('group_call:user_left', {
-          userId: info?.userId,
-          socketId: client.id,
-          participantsCount: participants.size,
-        });
-      }
+    participants.delete(socketId);
+    this.logger.log(`Client ${socketId} (User ${userId}) left group_call_${groupId}. Sisa peserta: ${participants.size}`);
+
+    this.server.to(`group_call_${groupId}`).emit('group_call:user_left', {
+      socketId,
+      userId,
+      participantsCount: participants.size,
     });
+    this.server.to(`group_${groupId}`).emit('group_call:user_left', {
+      socketId,
+      userId,
+      participantsCount: participants.size,
+    });
+
+    if (participants.size === 0) {
+      this.groupCallParticipants.delete(groupId);
+      const active = this.activeGroupCalls.get(groupId);
+      if (active) {
+        const duration = Math.max(1, Math.floor((Date.now() - active.startedAt.getTime()) / 1000));
+        if (active.callSessionId) {
+          try {
+            await this.callsService.updateCallStatus(active.callSessionId, CallStatus.COMPLETED, duration);
+          } catch (e: any) {
+            this.logger.error(`Gagal memperbarui status sesi panggilan grup: ${e.message}`);
+          }
+        }
+        this.activeGroupCalls.delete(groupId);
+      }
+      this.server.to(`group_${groupId}`).emit('group_call:ended', { groupId });
+    } else {
+      const active = this.activeGroupCalls.get(groupId);
+      this.server.to(`group_${groupId}`).emit('group_call:status_updated', {
+        groupId,
+        isActive: true,
+        participantsCount: participants.size,
+        mediaType: active?.mediaType || 'AUDIO',
+        initiatorName: active?.initiatorName || 'Peserta',
+      });
+    }
+  }
+
+  async handleDisconnect(client: Socket) {
+    const user = this.getClientUser(client);
+    const userId = user?.userId ? Number(user.userId) : null;
+
+    // Check if client was in any group calls and clean up
+    for (const [groupId, participants] of this.groupCallParticipants.entries()) {
+      if (participants.has(client.id)) {
+        await this.cleanupGroupCallParticipant(groupId, client.id, userId);
+      }
+    }
   }
 
   // ==========================================
@@ -403,7 +450,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Verify group region isolation
       const group = await this.prisma.group.findUnique({
         where: { id: groupId },
-        select: { id: true, region_id: true },
+        select: { id: true, name: true, region_id: true },
       });
       const dbUser = await this.prisma.user.findUnique({
         where: { id: userId },
@@ -439,6 +486,8 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return { error: 'GROUP_CALL_FULL' };
       }
 
+      const isFirstParticipant = participants.size === 0;
+
       // Register participant
       participants.set(client.id, {
         userId,
@@ -448,6 +497,91 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // Join socket room
       await client.join(`group_call_${groupId}`);
+
+      // If first participant, create CallSession, track active call, and notify group members!
+      if (isFirstParticipant) {
+        let callSessionId: number | undefined;
+        try {
+          const session = await this.callsService.initiateCall({
+            callerId: userId,
+            groupId,
+            callType: CallType.GROUP,
+            mediaType: data.mediaType === 'VIDEO' ? CallMediaType.VIDEO : CallMediaType.AUDIO,
+            regionId: group?.region_id || null,
+          });
+          callSessionId = session.id;
+        } catch (e: any) {
+          this.logger.error(`Failed to initiate group call session: ${e.message}`);
+        }
+
+        this.activeGroupCalls.set(groupId, {
+          groupId,
+          groupName: group?.name || 'Grup',
+          initiatorName: data.userName || 'Peserta',
+          mediaType: data.mediaType || 'AUDIO',
+          startedAt: new Date(),
+          callSessionId,
+        });
+
+        // Broadcast group_call:started to group room (users currently viewing this group)
+        this.server.to(`group_${groupId}`).emit('group_call:started', {
+          groupId,
+          groupName: group?.name || 'Grup',
+          initiatorName: data.userName || 'Peserta',
+          mediaType: data.mediaType || 'AUDIO',
+          participantsCount: 1,
+        });
+
+        // Notify all group members (for toast alerts across the app)
+        try {
+          const members = await this.prisma.groupMember.findMany({
+            where: { group_id: groupId },
+            select: { user_id: true },
+          });
+          members.forEach((m) => {
+            if (m.user_id !== userId) {
+              this.server.to(`user_${m.user_id}`).emit('group_call:notification', {
+                groupId,
+                groupName: group?.name || 'Grup',
+                initiatorName: data.userName || 'Peserta',
+                mediaType: data.mediaType || 'AUDIO',
+                participantsCount: 1,
+              });
+            }
+          });
+        } catch (err: any) {
+          this.logger.debug(`Error fetching group members for call alert: ${err.message}`);
+        }
+
+        // Post chat notice message into group stream
+        try {
+          const startMsg = await this.prisma.groupMessage.create({
+            data: {
+              group_id: groupId,
+              sender_id: userId,
+              content: `📞 ${data.userName || 'Peserta'} memulai panggilan ${data.mediaType === 'VIDEO' ? 'video' : 'suara'} grup.`,
+            },
+            include: {
+              sender: {
+                select: { id: true, email: true, biodata: true },
+              },
+            },
+          });
+          this.server.to(`group_${groupId}`).emit('group_message', startMsg);
+        } catch (e: any) {
+          this.logger.debug(`Error sending group call start message: ${e.message}`);
+        }
+      } else {
+        // Subsequent participant joined -> update active call counter for group room
+        const active = this.activeGroupCalls.get(groupId);
+        this.server.to(`group_${groupId}`).emit('group_call:status_updated', {
+          groupId,
+          isActive: true,
+          participantsCount: participants.size,
+          mediaType: active?.mediaType || data.mediaType || 'AUDIO',
+          initiatorName: active?.initiatorName || 'Peserta',
+        });
+      }
 
       // Return existing participants to new joiner
       const existingList = Array.from(participants.entries())
@@ -459,7 +593,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
           mediaType: info.mediaType,
         }));
 
-      // Broadcast to other participants that someone joined
+      // Broadcast to other participants in call that someone joined
       client.to(`group_call_${groupId}`).emit('group_call:user_joined', {
         socketId: client.id,
         userId,
@@ -477,6 +611,26 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.emit('group_call:error', { message: 'Gagal bergabung ke panggilan grup.' });
       return { error: 'SERVER_ERROR' };
     }
+  }
+
+  @SubscribeMessage('group_call:get_active')
+  handleGetActiveGroupCall(@MessageBody() data: { groupId: number | string }) {
+    const groupId = data?.groupId ? Number(data.groupId) : null;
+    if (!groupId) return { isActive: false };
+
+    const active = this.activeGroupCalls.get(groupId);
+    const participants = this.groupCallParticipants.get(groupId);
+    if (active && participants && participants.size > 0) {
+      return {
+        isActive: true,
+        groupId,
+        groupName: active.groupName,
+        initiatorName: active.initiatorName,
+        mediaType: active.mediaType,
+        participantsCount: participants.size,
+      };
+    }
+    return { isActive: false, groupId };
   }
 
   @SubscribeMessage('group_call:signal')
@@ -510,17 +664,8 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const groupId = data.groupId ? Number(data.groupId) : null;
       if (!groupId) return;
 
-      const participants = this.groupCallParticipants.get(groupId);
-      if (participants) {
-        participants.delete(client.id);
-        await client.leave(`group_call_${groupId}`);
-
-        this.server.to(`group_call_${groupId}`).emit('group_call:user_left', {
-          socketId: client.id,
-          userId,
-          participantsCount: participants.size,
-        });
-      }
+      await client.leave(`group_call_${groupId}`);
+      await this.cleanupGroupCallParticipant(groupId, client.id, userId);
 
       return { status: 'left' };
     } catch (err: any) {

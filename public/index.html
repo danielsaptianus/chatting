@@ -233,6 +233,23 @@
             </div>
           </div>
 
+          <!-- Active Group Call Banner (Live Join) -->
+          <div id="active-group-call-banner" class="active-group-call-banner hidden">
+            <div class="call-banner-left">
+              <span class="call-banner-pulse"></span>
+              <span class="call-banner-icon" id="call-banner-icon">📞</span>
+              <div class="call-banner-details">
+                <div class="call-banner-title" id="call-banner-title">Panggilan Grup Sedang Berlangsung</div>
+                <div class="call-banner-meta" id="call-banner-meta">1/8 Peserta • Suara</div>
+              </div>
+            </div>
+            <div class="call-banner-actions">
+              <button class="btn btn-success btn-sm btn-join-call" id="btn-banner-join-call" title="Gabung ke Panggilan Grup">
+                <span>🟢 Gabung Panggilan</span>
+              </button>
+            </div>
+          </div>
+
           <!-- Messages Stream Container -->
           <div class="chat-messages" id="chat-messages">
             <!-- Messages rendered here -->
@@ -764,7 +781,7 @@
       <!-- Video Call Viewport (FR-VC-01..04) -->
       <div id="video-call-viewport" class="video-call-viewport hidden">
         <div class="video-remote-wrapper" id="video-remote-wrapper">
-          <video id="remote-video" autoplay playsinline></video>
+          <video id="remote-video" autoplay playsinline webkit-playsinline></video>
           <div id="remote-video-fallback" class="video-fallback">
             <div class="video-fallback-avatar" id="remote-video-avatar">U</div>
             <span id="remote-video-name">Pengguna</span>
@@ -772,7 +789,7 @@
           <div id="remote-screen-badge" class="screen-badge hidden">🖥️ Layar Dibagikan</div>
         </div>
         <div class="video-local-pip" id="video-local-pip">
-          <video id="local-video" autoplay playsinline muted></video>
+          <video id="local-video" autoplay playsinline webkit-playsinline muted></video>
           <div id="local-video-fallback" class="video-fallback-pip hidden">📷</div>
           <span class="pip-label">Anda</span>
         </div>
