@@ -1,10 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '@common/prisma/prisma.service';
 import { CallStatus, CallType, CallMediaType } from '@prisma/client';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 
 @Injectable()
 export class CallsService {
+  private readonly logger = new Logger(CallsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsGateway: NotificationsGateway,
@@ -126,17 +128,27 @@ export class CallsService {
         // Broadcast to group room
         this.notificationsGateway.sendToGroup(session.group_id, 'group_message', groupMsg);
       }
-    } catch (e) {
-      // Ignore message insert errors
+    } catch (e: any) {
+      this.logger.error(`Error saving call log to chat: ${e.message}`, e.stack);
     }
 
     return updated;
   }
 
   async getCallHistory(userId: number) {
+    const userGroups = await this.prisma.groupMember.findMany({
+      where: { user_id: userId },
+      select: { group_id: true },
+    });
+    const groupIds = userGroups.map((g) => g.group_id);
+
     return this.prisma.callSession.findMany({
       where: {
-        OR: [{ caller_id: userId }, { receiver_id: userId }],
+        OR: [
+          { caller_id: userId },
+          { receiver_id: userId },
+          ...(groupIds.length > 0 ? [{ group_id: { in: groupIds } }] : []),
+        ],
       },
       include: {
         caller: { select: { id: true, email: true, biodata: true } },

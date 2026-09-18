@@ -17,6 +17,7 @@ import { CallMediaType, CallStatus, CallType } from '@prisma/client';
 interface GroupCallSessionState {
   groupId: number;
   groupName: string;
+  initiatorUserId?: number;
   initiatorName: string;
   mediaType: 'AUDIO' | 'VIDEO';
   startedAt: Date;
@@ -96,11 +97,47 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('join_group')
+  async handleJoinGroup(
+    @MessageBody() data: { groupId: number | string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    if (data?.groupId) {
+      await client.join(`group_${Number(data.groupId)}`);
+    }
+  }
+
+  @SubscribeMessage('leave_group')
+  async handleLeaveGroup(
+    @MessageBody() data: { groupId: number | string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    if (data?.groupId) {
+      await client.leave(`group_${Number(data.groupId)}`);
+    }
+  }
+
   private async cleanupGroupCallParticipant(groupId: number, socketId: string, userId: number | null) {
     const participants = this.groupCallParticipants.get(groupId);
-    if (!participants || !participants.has(socketId)) return;
+    if (!participants) return;
 
-    participants.delete(socketId);
+    // Remove by socketId or by userId if socketId mismatch
+    let removed = false;
+    if (participants.has(socketId)) {
+      participants.delete(socketId);
+      removed = true;
+    } else if (userId) {
+      for (const [sId, info] of participants.entries()) {
+        if (info.userId === userId) {
+          participants.delete(sId);
+          removed = true;
+          break;
+        }
+      }
+    }
+
+    if (!removed && participants.size > 0) return;
+
     this.logger.log(`Client ${socketId} (User ${userId}) left group_call_${groupId}. Sisa peserta: ${participants.size}`);
 
     this.server.to(`group_call_${groupId}`).emit('group_call:user_left', {
@@ -117,15 +154,59 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (participants.size === 0) {
       this.groupCallParticipants.delete(groupId);
       const active = this.activeGroupCalls.get(groupId);
-      if (active) {
-        const duration = Math.max(1, Math.floor((Date.now() - active.startedAt.getTime()) / 1000));
-        if (active.callSessionId) {
-          try {
-            await this.callsService.updateCallStatus(active.callSessionId, CallStatus.COMPLETED, duration);
-          } catch (e: any) {
-            this.logger.error(`Gagal memperbarui status sesi panggilan grup: ${e.message}`);
+      const duration = active ? Math.max(1, Math.floor((Date.now() - active.startedAt.getTime()) / 1000)) : 1;
+
+      // Find call session ID from memory or from DB
+      let sessionId = active?.callSessionId;
+      if (!sessionId) {
+        try {
+          const openSession = await this.prisma.callSession.findFirst({
+            where: { group_id: groupId, call_type: CallType.GROUP, ended_at: null },
+            orderBy: { started_at: 'desc' },
+          });
+          if (openSession) {
+            sessionId = openSession.id;
           }
+        } catch (e: any) {
+          this.logger.debug(`Error checking open group call session: ${e.message}`);
         }
+      }
+
+      if (sessionId) {
+        try {
+          await this.callsService.updateCallStatus(sessionId, CallStatus.COMPLETED, duration);
+        } catch (e: any) {
+          this.logger.error(`Gagal memperbarui status sesi panggilan grup: ${e.message}`);
+        }
+      } else {
+        // Fallback: create group message directly to guarantee it appears in chat history
+        try {
+          const mins = Math.floor(duration / 60);
+          const secs = duration % 60;
+          const durStr = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+          const isVideo = active?.mediaType === 'VIDEO';
+          const icon = isVideo ? '📹' : '📞';
+          const label = isVideo ? 'Panggilan Video' : 'Panggilan Suara';
+
+          const groupMsg = await this.prisma.groupMessage.create({
+            data: {
+              group_id: groupId,
+              sender_id: userId || active?.initiatorUserId || 1,
+              content: `${icon} ${label} Grup Selesai (${durStr})`,
+            },
+            include: {
+              sender: {
+                select: { id: true, email: true, biodata: true },
+              },
+            },
+          });
+          this.server.to(`group_${groupId}`).emit('group_message', groupMsg);
+        } catch (e: any) {
+          this.logger.error(`Gagal menyimpan log panggilan grup fallback: ${e.message}`);
+        }
+      }
+
+      if (active) {
         this.activeGroupCalls.delete(groupId);
       }
       this.server.to(`group_${groupId}`).emit('group_call:ended', { groupId });
@@ -411,6 +492,9 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       if (groupId) {
+        const user = this.getClientUser(client);
+        const senderId = user?.userId ? Number(user.userId) : null;
+        await this.cleanupGroupCallParticipant(groupId, client.id, senderId);
         this.server.to(`group_call_${groupId}`).emit('call:ended', {
           callId,
           duration,
@@ -517,6 +601,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.activeGroupCalls.set(groupId, {
           groupId,
           groupName: group?.name || 'Grup',
+          initiatorUserId: userId,
           initiatorName: data.userName || 'Peserta',
           mediaType: data.mediaType || 'AUDIO',
           startedAt: new Date(),

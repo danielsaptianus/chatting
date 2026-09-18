@@ -331,7 +331,7 @@ function setupSocketListeners() {
 
   // Group Message Event
   socketClient.on('group_message', (message) => {
-    if (state.activeChat?.type === 'group' && state.activeChat.id === message.group_id) {
+    if (state.activeChat?.type === 'group' && Number(state.activeChat.id) === Number(message.group_id)) {
       appendMessageBubble(message, message.sender_id === state.currentUser?.id);
     } else {
       // Toast notification for incoming group message
@@ -1355,8 +1355,9 @@ function appendMessageBubble(message, isOutgoing) {
   const emptyEl = container.querySelector('.empty-state');
   if (emptyEl) emptyEl.remove();
 
+  const isCallLog = typeof message.content === 'string' && (message.content.startsWith('📞') || message.content.startsWith('📹'));
   const bubble = document.createElement('div');
-  bubble.className = `message-bubble ${isOutgoing ? 'outgoing' : 'incoming'}`;
+  bubble.className = `message-bubble ${isOutgoing ? 'outgoing' : 'incoming'} ${isCallLog ? 'bubble-call-log' : ''}`;
 
   const timeStr = message.created_at
     ? new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })

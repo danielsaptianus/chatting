@@ -922,7 +922,9 @@ class WebRTCManager {
     if (screenBadge) screenBadge.classList.add('hidden');
 
     if (typeof loadChatMessages === 'function' && state.activeChat) {
-      loadChatMessages();
+      setTimeout(() => {
+        loadChatMessages();
+      }, 500);
     }
 
     if (typeof renderActiveGroupCallBanner === 'function' && typeof currentActiveGroupCall !== 'undefined' && currentActiveGroupCall) {
