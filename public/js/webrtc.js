@@ -481,7 +481,9 @@ class WebRTCManager {
 
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === 'connected') {
-        this.startCallTimer();
+        if (!this.currentCall?.timerInterval) {
+          this.startCallTimer();
+        }
         this.updateCallStatusUI('Terhubung');
       } else if (pc.connectionState === 'failed') {
         console.warn(`Peer connection failed with ${key}`);
@@ -592,7 +594,7 @@ class WebRTCManager {
             return;
           }
 
-          this.startCallTimer();
+          this.startCallTimer(response?.startedAt);
           this.updateCallStatusUI('Terhubung');
           this.updateParticipantCountUI(response?.participantsCount || 1);
 
@@ -990,22 +992,39 @@ class WebRTCManager {
     if (modal) modal.classList.remove('hidden');
   }
 
-  startCallTimer() {
+  startCallTimer(customStartTime = null) {
     if (!this.currentCall) return;
-    this.currentCall.startTime = Date.now();
-    const durationEl = document.getElementById('active-call-duration');
 
-    if (this.currentCall.timerInterval) {
-      clearInterval(this.currentCall.timerInterval);
+    // Synchronize start time if server startedAt is provided
+    if (customStartTime) {
+      const serverTime = new Date(customStartTime).getTime();
+      if (!isNaN(serverTime)) {
+        if (!this.currentCall.startTime || serverTime < this.currentCall.startTime) {
+          this.currentCall.startTime = serverTime;
+        }
+      }
     }
 
-    this.currentCall.timerInterval = setInterval(() => {
+    if (!this.currentCall.startTime) {
+      this.currentCall.startTime = Date.now();
+    }
+
+    // If timer is already running, do NOT recreate interval or reset clock!
+    if (this.currentCall.timerInterval) {
+      return;
+    }
+
+    const durationEl = document.getElementById('active-call-duration');
+    const updateTimer = () => {
       if (!this.currentCall?.startTime) return;
-      const elapsed = Math.floor((Date.now() - this.currentCall.startTime) / 1000);
+      const elapsed = Math.max(0, Math.floor((Date.now() - this.currentCall.startTime) / 1000));
       const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
       const secs = (elapsed % 60).toString().padStart(2, '0');
       if (durationEl) durationEl.textContent = `${mins}:${secs}`;
-    }, 1000);
+    };
+
+    updateTimer();
+    this.currentCall.timerInterval = setInterval(updateTimer, 1000);
   }
 
   updateCallStatusUI(text) {

@@ -687,9 +687,12 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         participantsCount: participants.size,
       });
 
+      const activeCall = this.activeGroupCalls.get(groupId);
+
       return {
         participants: existingList,
         participantsCount: participants.size,
+        startedAt: activeCall?.startedAt ? activeCall.startedAt.toISOString() : new Date().toISOString(),
       };
     } catch (err: any) {
       this.logger.error(`Error in handleGroupCallJoin: ${err.message}`);
@@ -713,6 +716,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         initiatorName: active.initiatorName,
         mediaType: active.mediaType,
         participantsCount: participants.size,
+        startedAt: active.startedAt ? active.startedAt.toISOString() : new Date().toISOString(),
       };
     }
     return { isActive: false, groupId };

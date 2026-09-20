@@ -798,6 +798,48 @@ select:focus {
 .chat-header-actions {
   display: flex;
   gap: 8px;
+  align-items: center;
+}
+
+.chat-header-actions .btn-header-action {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-glass);
+  color: #ffffff !important;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.chat-header-actions .btn-header-action:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.chat-header-actions .btn-header-action svg {
+  width: 18px;
+  height: 18px;
+  stroke: #ffffff;
+  color: #ffffff;
+  pointer-events: none;
+}
+
+.chat-avatar[style*="cursor: pointer"] {
+  transition: var(--transition);
+}
+.chat-avatar[style*="cursor: pointer"]:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.5);
+}
+
+.chat-title[style*="cursor: pointer"]:hover {
+  color: var(--primary);
 }
 
 /* Chat Messages Stream */

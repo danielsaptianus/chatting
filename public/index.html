@@ -244,7 +244,7 @@
               </div>
             </div>
             <div class="call-banner-actions">
-              <button class="btn btn-success btn-sm btn-join-call" id="btn-banner-join-call" title="Gabung ke Panggilan Grup">
+              <button class="btn btn-success btn-sm btn-join-call" id="btn-banner-join-call" onclick="joinActiveGroupCallFromBanner()" title="Gabung ke Panggilan Grup">
                 <span>🟢 Gabung Panggilan</span>
               </button>
             </div>
@@ -834,62 +834,7 @@
     </div>
   </div>
 
-  <!-- Modal: Ekspor Chat (FR-EXP-01 - FR-EXP-04) -->
-  <div id="modal-export-chat" class="modal-overlay hidden">
-    <div class="modal-dialog glass-panel">
-      <div class="modal-header">
-        <h3>📥 Ekspor Riwayat Chat</h3>
-        <button class="btn-icon" onclick="closeModal('modal-export-chat')">✕</button>
-      </div>
-      <form id="form-export-chat">
-        <div class="modal-body">
-          <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:14px;">
-            Unduh salinan riwayat percakapan yang memuat stempel waktu, pengirim, dan teks pesan secara rapi.
-          </p>
-          <div class="form-group">
-            <label>Format Berkas:</label>
-            <div style="display:flex; gap:16px; margin-top:6px;">
-              <label class="radio-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                <input type="radio" name="export-format" value="txt" checked>
-                <span>Teks (.txt)</span>
-              </label>
-              <label class="radio-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                <input type="radio" name="export-format" value="json">
-                <span>JSON (.json)</span>
-              </label>
-            </div>
-          </div>
-          <div class="form-group">
-            <label>Rentang Waktu:</label>
-            <div style="display:flex; gap:16px; margin-top:6px; margin-bottom:10px;">
-              <label class="radio-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                <input type="radio" name="export-range" value="all" checked onchange="toggleExportDateInputs(false)">
-                <span>Seluruh Waktu</span>
-              </label>
-              <label class="radio-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                <input type="radio" name="export-range" value="range" onchange="toggleExportDateInputs(true)">
-                <span>Rentang Tanggal</span>
-              </label>
-            </div>
-          </div>
-          <div id="export-date-fields" class="hidden" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-            <div class="form-group">
-              <label for="export-start-date">Dari Tanggal:</label>
-              <input type="date" id="export-start-date">
-            </div>
-            <div class="form-group">
-              <label for="export-end-date">Sampai Tanggal:</label>
-              <input type="date" id="export-end-date">
-            </div>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-export-chat')">Batal</button>
-          <button type="submit" class="btn btn-primary" id="btn-submit-export">Unduh Berkas 💾</button>
-        </div>
-      </form>
-    </div>
-  </div>
+
 
   <!-- Modal: Buat Komunitas Baru (FR-COM-01 & FR-COM-02) -->
   <div id="modal-create-community" class="modal-overlay hidden">

@@ -179,10 +179,9 @@ function setupEventListeners() {
   // Create Group Form
   document.getElementById('form-create-group').addEventListener('submit', handleCreateGroup);
 
-  // Community & Export Forms
+  // Community Forms
   document.getElementById('form-create-community').addEventListener('submit', handleCreateCommunitySubmit);
   document.getElementById('form-link-group').addEventListener('submit', handleLinkGroupSubmit);
-  document.getElementById('form-export-chat').addEventListener('submit', handleExportSubmit);
 
   // Add Member Form
   document.getElementById('form-add-member').addEventListener('submit', handleAddMember);
@@ -522,14 +521,17 @@ function renderActiveGroupCallBanner(callData) {
 
     if (isAlreadyInCall) {
       btnJoin.disabled = true;
+      btnJoin.onclick = null;
       btnJoin.innerHTML = '<span>📞 Anda Sedang Terhubung</span>';
       btnJoin.className = 'btn btn-outline btn-sm';
     } else if (isFull) {
       btnJoin.disabled = true;
+      btnJoin.onclick = null;
       btnJoin.innerHTML = '<span>👥 Panggilan Penuh (8/8)</span>';
       btnJoin.className = 'btn btn-outline btn-sm';
     } else {
       btnJoin.disabled = false;
+      btnJoin.onclick = () => joinActiveGroupCallFromBanner();
       btnJoin.innerHTML = `<span>🟢 Gabung ${label}</span>`;
       btnJoin.className = 'btn btn-success btn-sm btn-join-call';
     }
@@ -537,6 +539,22 @@ function renderActiveGroupCallBanner(callData) {
 
   banner.classList.remove('hidden');
 }
+
+function joinActiveGroupCallFromBanner() {
+  if (!currentActiveGroupCall || !currentActiveGroupCall.groupId) return;
+  const targetGroupId = Number(currentActiveGroupCall.groupId);
+  const group =
+    state.groups.find((g) => g.id === targetGroupId) ||
+    (state.activeChat?.type === 'group' ? state.activeChat.data : null) ||
+    { name: currentActiveGroupCall.groupName || 'Grup' };
+
+  webrtcManager.startGroupCall(
+    targetGroupId,
+    group.name || currentActiveGroupCall.groupName || 'Grup',
+    currentActiveGroupCall.mediaType || 'AUDIO'
+  );
+}
+window.joinActiveGroupCallFromBanner = joinActiveGroupCallFromBanner;
 
 function hideActiveGroupCallBanner() {
   const banner = document.getElementById('active-group-call-banner');
@@ -1194,13 +1212,15 @@ async function selectGroupChat(groupId, communityId = null) {
   const groupAvatarEl = document.getElementById('active-chat-avatar');
   groupAvatarEl.textContent = (group.name || 'G').charAt(0).toUpperCase();
   groupAvatarEl.className = 'chat-avatar';
-  groupAvatarEl.onclick = null;
-  groupAvatarEl.title = '';
+  groupAvatarEl.style.cursor = 'pointer';
+  groupAvatarEl.title = 'Lihat Detail Grup';
+  groupAvatarEl.onclick = () => toggleInfoDrawer();
   
   const groupTitleEl = document.getElementById('active-chat-title');
   groupTitleEl.textContent = group.name;
-  groupTitleEl.onclick = null;
-  groupTitleEl.title = '';
+  groupTitleEl.style.cursor = 'pointer';
+  groupTitleEl.title = 'Lihat Detail Grup';
+  groupTitleEl.onclick = () => toggleInfoDrawer();
   document.getElementById('active-chat-subtitle').textContent = `${group.members?.length || 0} Anggota`;
 
   const currentMember = (group.members || []).find((m) => m.user_id === state.currentUser?.id);
@@ -1231,15 +1251,36 @@ async function selectGroupChat(groupId, communityId = null) {
     if (btnSend) btnSend.disabled = false;
   }
 
-  // Header action buttons (Panggilan Suara, Video Call, Ekspor, Tambah, Tautan, Detail)
+  // Header action buttons (Ikon saja: Panggilan Suara warna putih, Video Call, Tambah, Tautan)
   const actionsContainer = document.getElementById('chat-header-actions');
   actionsContainer.innerHTML = `
-    <button class="btn btn-outline btn-sm" onclick="webrtcManager.startGroupCall(${groupId}, '${escapeHtml(group.name)}', 'AUDIO')" title="Mulai Panggilan Suara Grup">📞 Suara</button>
-    <button class="btn btn-outline btn-sm" onclick="webrtcManager.startGroupCall(${groupId}, '${escapeHtml(group.name)}', 'VIDEO')" title="Mulai Panggilan Video Grup (Maks 8 Peserta - BR-VC-01)">📹 Video</button>
-    <button class="btn btn-outline btn-sm" onclick="openExportModal('group', ${groupId})" title="Unduh Arsip Chat">📥 Ekspor</button>
-    ${isStaff ? `<button class="btn btn-outline btn-sm" onclick="openAddMemberModal(${groupId})">➕ Tambah</button>` : ''}
-    ${isStaff ? `<button class="btn btn-outline btn-sm" onclick="openGroupInviteModal(${groupId})">🔗 Tautan</button>` : ''}
-    <button class="btn btn-outline btn-sm" onclick="toggleInfoDrawer()">ℹ️ Detail</button>
+    <button class="btn btn-outline btn-sm btn-icon btn-header-action" onclick="webrtcManager.startGroupCall(${groupId}, '${escapeHtml(group.name)}', 'AUDIO')" title="Panggilan Suara">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:block; color:#ffffff;">
+        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+      </svg>
+    </button>
+    <button class="btn btn-outline btn-sm btn-icon btn-header-action" onclick="webrtcManager.startGroupCall(${groupId}, '${escapeHtml(group.name)}', 'VIDEO')" title="Panggilan Video (Maks 8 Peserta)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:block; color:#ffffff;">
+        <polygon points="23 7 16 12 23 17 23 7"></polygon>
+        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+      </svg>
+    </button>
+    ${isStaff ? `
+    <button class="btn btn-outline btn-sm btn-icon btn-header-action" onclick="openAddMemberModal(${groupId})" title="Tambah Anggota">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block; color:#ffffff;">
+        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+        <circle cx="8.5" cy="7" r="4"></circle>
+        <line x1="20" y1="8" x2="20" y2="14"></line>
+        <line x1="23" y1="11" x2="17" y2="11"></line>
+      </svg>
+    </button>` : ''}
+    ${isStaff ? `
+    <button class="btn btn-outline btn-sm btn-icon btn-header-action" onclick="openGroupInviteModal(${groupId})" title="Salin Tautan Undangan">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block; color:#ffffff;">
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+      </svg>
+    </button>` : ''}
   `;
 
   // Render info drawer
@@ -1310,10 +1351,17 @@ async function selectPCChat(userId) {
   document.getElementById('active-chat-subtitle').textContent = contact.email;
 
   document.getElementById('chat-header-actions').innerHTML = `
-    <button class="btn btn-outline btn-sm" onclick="webrtcManager.startDirectCall(${userId}, '${escapeHtml(name)}', 'AUDIO')" title="Panggilan Suara 1-on-1">📞 Suara</button>
-    <button class="btn btn-outline btn-sm" onclick="webrtcManager.startDirectCall(${userId}, '${escapeHtml(name)}', 'VIDEO')" title="Panggilan Video 1-on-1 (WebRTC)">📹 Video</button>
-    <button class="btn btn-outline btn-sm" onclick="openExportModal('pc', ${userId})" title="Unduh Arsip Chat">📥 Ekspor</button>
-    <button class="btn btn-outline btn-sm" onclick="showPublicProfile(${userId})" title="Profil Publik">ℹ️ Profil</button>
+    <button class="btn btn-outline btn-sm btn-icon btn-header-action" onclick="webrtcManager.startDirectCall(${userId}, '${escapeHtml(name)}', 'AUDIO')" title="Panggilan Suara">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:block; color:#ffffff;">
+        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+      </svg>
+    </button>
+    <button class="btn btn-outline btn-sm btn-icon btn-header-action" onclick="webrtcManager.startDirectCall(${userId}, '${escapeHtml(name)}', 'VIDEO')" title="Panggilan Video">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:block; color:#ffffff;">
+        <polygon points="23 7 16 12 23 17 23 7"></polygon>
+        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+      </svg>
+    </button>
   `;
 
   renderUserInfoDrawer(contact);
@@ -2582,74 +2630,7 @@ function closeModal(id) {
   if (modal) modal.classList.add('hidden');
 }
 
-// ==========================================================================
-// Chat Export Handlers (FR-EXP-01 s/d FR-EXP-04)
-// ==========================================================================
-let currentExportContext = { type: 'group', id: null };
 
-function openExportModal(type, id) {
-  currentExportContext = { type, id };
-  openModal('modal-export-chat');
-  const txtRadio = document.querySelector('input[name="export-format"][value="txt"]');
-  const allRadio = document.querySelector('input[name="export-range"][value="all"]');
-  if (txtRadio) txtRadio.checked = true;
-  if (allRadio) allRadio.checked = true;
-  toggleExportDateInputs(false);
-  const startInput = document.getElementById('export-start-date');
-  const endInput = document.getElementById('export-end-date');
-  if (startInput) startInput.value = '';
-  if (endInput) endInput.value = '';
-}
-
-function toggleExportDateInputs(show) {
-  const fields = document.getElementById('export-date-fields');
-  if (fields) {
-    if (show) fields.classList.remove('hidden');
-    else fields.classList.add('hidden');
-  }
-}
-
-async function handleExportSubmit(e) {
-  e.preventDefault();
-  if (!currentExportContext.id) return;
-
-  const format = document.querySelector('input[name="export-format"]:checked')?.value || 'txt';
-  const rangeType = document.querySelector('input[name="export-range"]:checked')?.value || 'all';
-  const startDate = rangeType === 'range' ? document.getElementById('export-start-date').value : '';
-  const endDate = rangeType === 'range' ? document.getElementById('export-end-date').value : '';
-
-  const submitBtn = document.getElementById('btn-submit-export');
-  const originalText = submitBtn.innerHTML;
-  submitBtn.disabled = true;
-  submitBtn.innerHTML = 'Mengunduh... ⏳';
-
-  try {
-    let result;
-    if (currentExportContext.type === 'group') {
-      result = await api.exportGroupChat(currentExportContext.id, format, startDate, endDate);
-    } else {
-      result = await api.exportPCChat(currentExportContext.id, format, startDate, endDate);
-    }
-
-    // Trigger browser file download
-    const url = window.URL.createObjectURL(result.blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = result.filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.URL.revokeObjectURL(url);
-
-    closeModal('modal-export-chat');
-    showToast('Ekspor Berhasil', `Berkas ${result.filename} berhasil diunduh.`, 'success', '💾');
-  } catch (err) {
-    showToast('Gagal Ekspor', err.message, 'error', '❌');
-  } finally {
-    submitBtn.disabled = false;
-    submitBtn.innerHTML = originalText;
-  }
-}
 
 // ==========================================================================
 // Community Handlers (FR-COM-01 s/d FR-COM-05)
