@@ -14,6 +14,8 @@ const state = {
   communities: [],
   notifications: [],
   usersCache: [],
+  regionsCache: null,
+  allGroupsCache: null,
 };
 
 // ==========================================================================
@@ -1731,6 +1733,7 @@ async function handleCreateGroup(e) {
 
   try {
     const newGroup = await api.createGroup(name, description);
+    state.allGroupsCache = null;
     closeModal('modal-create-group');
     document.getElementById('form-create-group').reset();
     showToast('Grup Dibuat', `Grup "${name}" berhasil dibuat!`, 'success', '🎉');
@@ -2400,7 +2403,7 @@ async function loadAdminUsersList() {
 
 async function openRegisterUserModal() {
   const form = document.getElementById('form-register-user');
-  form.reset();
+  if (form) form.reset();
 
   const myRole = state.currentUser?.biodata?.role || 'USER';
   const roleSelect = document.getElementById('reg-role');
@@ -2409,6 +2412,9 @@ async function openRegisterUserModal() {
   const userGroupWrapper = document.getElementById('group-user-select-wrapper');
   const regionWrapper = document.getElementById('region-select-wrapper');
   const regionSelect = document.getElementById('reg-user-region');
+
+  // Open modal immediately for instant 0ms feedback
+  openModal('modal-register-user');
 
   if (myRole === 'SUPER_ADMIN') {
     // Super Admin can create USER, REGION_ADMIN, or ADMIN
@@ -2421,30 +2427,48 @@ async function openRegisterUserModal() {
     adminNotice.classList.add('hidden');
     if (regionWrapper) regionWrapper.classList.remove('hidden');
 
-    // Populate region dropdown
-    try {
-      const regions = await api.getRegions();
-      if (regionSelect) {
+    const populateDropdowns = (regions, groups) => {
+      if (regionSelect && regions) {
         regionSelect.innerHTML =
           '<option value="">-- Pilih Wilayah / Region --</option>' +
           (regions || [])
             .map((r) => `<option value="${r.id}">${escapeHtml(r.name)} (${escapeHtml(r.code)})</option>`)
             .join('');
       }
-    } catch {}
+      if (groups) {
+        const managedGroupSelect = document.getElementById('reg-managed-group');
+        const userGroupSelect = document.getElementById('reg-user-group');
+        const optionsHtml =
+          '<option value="">-- Pilih Grup --</option>' +
+          (groups || []).map((g) => `<option value="${g.id}">${escapeHtml(g.name)} (#${g.id})</option>`).join('');
 
-    // Populate group dropdowns
-    try {
-      const allGroups = await api.getAllGroups();
-      const optionsHtml =
-        '<option value="">-- Pilih Grup --</option>' +
-        (allGroups || []).map((g) => `<option value="${g.id}">${escapeHtml(g.name)} (#${g.id})</option>`).join('');
+        if (managedGroupSelect) managedGroupSelect.innerHTML = optionsHtml;
+        if (userGroupSelect) {
+          userGroupSelect.innerHTML =
+            '<option value="">-- Tanpa Grup Langsung --</option>' +
+            (groups || []).map((g) => `<option value="${g.id}">${escapeHtml(g.name)} (#${g.id})</option>`).join('');
+        }
+      }
+    };
 
-      document.getElementById('reg-managed-group').innerHTML = optionsHtml;
-      document.getElementById('reg-user-group').innerHTML =
-        '<option value="">-- Tanpa Grup Langsung --</option>' +
-        (allGroups || []).map((g) => `<option value="${g.id}">${escapeHtml(g.name)} (#${g.id})</option>`).join('');
-    } catch {}
+    // If cached, render immediately without waiting for network!
+    if (state.regionsCache && state.allGroupsCache) {
+      populateDropdowns(state.regionsCache, state.allGroupsCache);
+    } else {
+      if (regionSelect) regionSelect.innerHTML = '<option value="">Memuat wilayah...</option>';
+      const managedGroupSelect = document.getElementById('reg-managed-group');
+      if (managedGroupSelect) managedGroupSelect.innerHTML = '<option value="">Memuat grup...</option>';
+    }
+
+    // Fetch in parallel using Promise.all (non-blocking)
+    Promise.all([
+      state.regionsCache ? Promise.resolve(state.regionsCache) : api.getRegions().catch(() => []),
+      state.allGroupsCache ? Promise.resolve(state.allGroupsCache) : api.getAllGroups().catch(() => []),
+    ]).then(([regions, groups]) => {
+      state.regionsCache = regions || [];
+      state.allGroupsCache = groups || [];
+      populateDropdowns(state.regionsCache, state.allGroupsCache);
+    });
 
     handleRegRoleChange();
   } else if (myRole === 'REGION_ADMIN') {
@@ -2466,8 +2490,6 @@ async function openRegisterUserModal() {
     if (managedGroupWrapper) managedGroupWrapper.classList.add('hidden');
     if (userGroupWrapper) userGroupWrapper.classList.add('hidden');
   }
-
-  openModal('modal-register-user');
 }
 
 function handleRegRoleChange() {
@@ -2705,16 +2727,14 @@ async function handleCreateCommunitySubmit(e) {
 // ==========================================================================
 async function openAdminRegionsModal() {
   openModal('modal-admin-regions');
-  await loadAdminRegions();
+  loadAdminRegions();
 }
 
 async function loadAdminRegions() {
   const container = document.getElementById('admin-regions-list');
   if (!container) return;
-  container.innerHTML = '<div class="empty-state">Memuat data region...</div>';
 
-  try {
-    const regions = await api.getRegions();
+  const renderRegions = (regions) => {
     if (!regions || regions.length === 0) {
       container.innerHTML = '<div class="empty-state">Belum ada wilayah/region terdaftar.</div>';
       return;
@@ -2750,8 +2770,23 @@ async function loadAdminRegions() {
         `;
       })
       .join('');
+  };
+
+  // If cached, render immediately without empty state flash
+  if (state.regionsCache && state.regionsCache.length > 0) {
+    renderRegions(state.regionsCache);
+  } else {
+    container.innerHTML = '<div class="empty-state">Memuat data region...</div>';
+  }
+
+  try {
+    const regions = await api.getRegions();
+    state.regionsCache = regions || [];
+    renderRegions(state.regionsCache);
   } catch (err) {
-    container.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    if (!state.regionsCache) {
+      container.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
   }
 }
 
@@ -2774,6 +2809,7 @@ async function handleCreateRegion(e) {
 
   try {
     await api.createRegion(name, code, description);
+    state.regionsCache = null;
     showToast('Region Dibuat', `Wilayah "${name}" (${code}) berhasil didaftarkan.`, 'success', '📍');
     document.getElementById('form-create-region').reset();
     toggleCreateRegionForm(false);
@@ -2822,6 +2858,7 @@ async function handleAssignRegionAdmin(e) {
 
   try {
     await api.assignRegionAdmin(regionId, userId);
+    state.regionsCache = null;
     showToast('Admin Ditugaskan', 'Admin Region berhasil ditetapkan (BR-TENANT-01).', 'success', '🛡️');
     closeModal('modal-assign-region-admin');
     await loadAdminRegions();
