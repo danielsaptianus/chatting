@@ -968,61 +968,47 @@ select:focus {
 }
 
 /* ==========================================================================
-   Modals (High Performance 60 FPS)
+   Modals (High Performance Instant Render - Zero GPU Blur Lag)
    ========================================================================== */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(11, 15, 25, 0.75);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: rgba(8, 12, 22, 0.82);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
   z-index: 100;
-  animation: modalOverlayFadeIn 0.15s ease-out;
-  will-change: opacity;
-}
-
-@keyframes modalOverlayFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  contain: layout style;
 }
 
 .modal-dialog {
   width: 100%;
   max-width: 500px;
   border-radius: var(--radius-lg);
-  background: #111827;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  background: #111827 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.85);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   max-height: 90vh;
-  animation: modalDialogPopIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: transform, opacity;
   transform: translateZ(0);
 }
 
-@keyframes modalDialogPopIn {
-  from {
-    opacity: 0;
-    transform: scale(0.96) translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-/* Eliminate expensive nested backdrop-filters inside modal popups */
+/* Eliminate expensive backdrop-filters completely on modal overlay and dialogs */
+.modal-overlay,
+.modal-overlay *,
+.modal-dialog,
+.modal-dialog *,
 .modal-dialog.glass-panel,
 .modal-dialog .glass-panel {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  background: #131b2e !important;
+  box-shadow: none;
+}
+.modal-dialog {
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.85) !important;
 }
 
 .modal-dialog.modal-lg {
@@ -1072,11 +1058,18 @@ select:focus {
   background: var(--bg-secondary);
 }
 
+/* Nested Modals (when opened on top of another modal like Tambah User or Edit User) */
 #modal-register-user,
 #modal-edit-user,
+#modal-assign-region-admin,
+#modal-add-member,
+#modal-group-invite,
+#modal-link-group,
+#modal-community-members,
 #modal-my-profile,
 #modal-public-profile {
   z-index: 120;
+  background: rgba(0, 0, 0, 0.58) !important;
 }
 
 /* Admin Table */

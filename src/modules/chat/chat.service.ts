@@ -103,23 +103,14 @@ export class ChatService {
 
     return this.prisma.group.findMany({
       where: whereClause,
-      include: {
-        creator: {
-          select: { id: true, email: true, biodata: true },
-        },
-        members: {
-          include: {
-            user: {
-              select: { id: true, email: true, biodata: true },
-            },
-          },
-        },
-        join_requests: {
-          where: { status: JoinRequestStatus.PENDING },
-          select: { id: true, user_id: true, status: true },
-        },
+      select: {
+        id: true,
+        name: true,
+        region_id: true,
+        is_announcement: true,
+        created_at: true,
       },
-      orderBy: { created_at: 'desc' },
+      orderBy: { name: 'asc' },
     });
   }
 

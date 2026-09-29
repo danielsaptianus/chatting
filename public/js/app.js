@@ -106,6 +106,16 @@ function initApp() {
   socketClient.connect();
   loadConversations();
   loadNotifications();
+
+  // Background warmup cache for instant modal opening
+  const myRole = state.currentUser?.biodata?.role || 'USER';
+  if (myRole === 'SUPER_ADMIN' || myRole === 'REGION_ADMIN' || myRole === 'ADMIN') {
+    setTimeout(() => {
+      if (!state.regionsCache) api.getRegions().then((r) => { state.regionsCache = r || []; }).catch(() => {});
+      if (!state.allGroupsCache) api.getAllGroups().then((g) => { state.allGroupsCache = g || []; }).catch(() => {});
+      if (!state.usersCache || state.usersCache.length === 0) api.getUsers(false).then((u) => { state.usersCache = u || []; }).catch(() => {});
+    }, 800);
+  }
 }
 
 // ==========================================================================
@@ -2334,70 +2344,82 @@ async function showPublicProfile(userId) {
 // ==========================================================================
 // Admin Users Management (BR-ROLE-01 - BR-ROLE-02, FR-ROLE-01 - FR-ROLE-05)
 // ==========================================================================
+function renderUsersTableRows(users, tbody, myRole) {
+  if (!users || users.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Tidak ada data pengguna.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = users.map((u) => {
+    const name = u.biodata ? `${u.biodata.first_name} ${u.biodata.last_name}` : '-';
+    const role = u.biodata?.role || 'USER';
+    const isDeleted = !!u.deleted_at;
+    const statusBadge = isDeleted
+      ? '<span class="badge-status badge-deleted">Deleted</span>'
+      : u.biodata?.is_active
+      ? '<span class="badge-status badge-active">Aktif</span>'
+      : '<span class="badge-status badge-deleted">Nonaktif</span>';
+
+    const avatarHtml = u.biodata?.avatar_url
+      ? `<img src="${u.biodata.avatar_url}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:6px;">`
+      : `<span class="conv-avatar user" style="width:28px;height:28px;font-size:0.75rem;display:inline-flex;align-items:center;justify-content:center;margin-right:6px;">${(name.charAt(0) || 'U').toUpperCase()}</span>`;
+
+    const groupManagedName = u.managed_group ? escapeHtml(u.managed_group.name) : '-';
+
+    // Permission check for soft-delete
+    let canDelete = false;
+    if (!isDeleted && u.id !== state.currentUser?.id) {
+      if (myRole === 'SUPER_ADMIN') {
+        canDelete = true;
+      } else if (myRole === 'ADMIN' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') {
+        canDelete = true;
+      }
+    }
+
+    return `
+      <tr>
+        <td>${u.id}</td>
+        <td>
+          <div style="display:flex; align-items:center; cursor:pointer;" onclick="showPublicProfile(${u.id})">
+            ${avatarHtml}
+            <strong>${escapeHtml(name)}</strong>
+          </div>
+        </td>
+        <td>${escapeHtml(u.email)}</td>
+        <td><span class="user-role-badge">${role}</span></td>
+        <td><small style="color:var(--text-secondary);">${groupManagedName}</small></td>
+        <td>${statusBadge}</td>
+        <td>
+          <button class="btn btn-outline btn-sm" onclick="openEditUserModal(${u.id})">Edit</button>
+          ${canDelete ? `<button class="btn btn-danger btn-sm" onclick="handleSoftDeleteUser(${u.id})">Soft Delete</button>` : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
 async function loadAdminUsersList() {
   const tbody = document.getElementById('table-users-body');
-  tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Memuat data pengguna...</td></tr>';
+  if (!tbody) return;
 
-  const includeDeleted = document.getElementById('check-include-deleted').checked;
+  const includeDeleted = document.getElementById('check-include-deleted')?.checked;
   const myRole = state.currentUser?.biodata?.role || 'USER';
+
+  // Render existing cache immediately if available!
+  if (state.usersCache && state.usersCache.length > 0 && !includeDeleted) {
+    renderUsersTableRows(state.usersCache, tbody, myRole);
+  } else {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Memuat data pengguna...</td></tr>';
+  }
 
   try {
     const users = await api.getUsers(includeDeleted);
     state.usersCache = users;
-
-    if (!users || users.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Tidak ada data pengguna.</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = users.map((u) => {
-      const name = u.biodata ? `${u.biodata.first_name} ${u.biodata.last_name}` : '-';
-      const role = u.biodata?.role || 'USER';
-      const isDeleted = !!u.deleted_at;
-      const statusBadge = isDeleted
-        ? '<span class="badge-status badge-deleted">Deleted</span>'
-        : u.biodata?.is_active
-        ? '<span class="badge-status badge-active">Aktif</span>'
-        : '<span class="badge-status badge-deleted">Nonaktif</span>';
-
-      const avatarHtml = u.biodata?.avatar_url
-        ? `<img src="${u.biodata.avatar_url}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:6px;">`
-        : `<span class="conv-avatar user" style="width:28px;height:28px;font-size:0.75rem;display:inline-flex;align-items:center;justify-content:center;margin-right:6px;">${(name.charAt(0) || 'U').toUpperCase()}</span>`;
-
-      const groupManagedName = u.managed_group ? escapeHtml(u.managed_group.name) : '-';
-
-      // Permission check for soft-delete
-      let canDelete = false;
-      if (!isDeleted && u.id !== state.currentUser?.id) {
-        if (myRole === 'SUPER_ADMIN') {
-          canDelete = true;
-        } else if (myRole === 'ADMIN' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') {
-          canDelete = true;
-        }
-      }
-
-      return `
-        <tr>
-          <td>${u.id}</td>
-          <td>
-            <div style="display:flex; align-items:center; cursor:pointer;" onclick="showPublicProfile(${u.id})">
-              ${avatarHtml}
-              <strong>${escapeHtml(name)}</strong>
-            </div>
-          </td>
-          <td>${escapeHtml(u.email)}</td>
-          <td><span class="user-role-badge">${role}</span></td>
-          <td><small style="color:var(--text-secondary);">${groupManagedName}</small></td>
-          <td>${statusBadge}</td>
-          <td>
-            <button class="btn btn-outline btn-sm" onclick="openEditUserModal(${u.id})">Edit</button>
-            ${canDelete ? `<button class="btn btn-danger btn-sm" onclick="handleSoftDeleteUser(${u.id})">Soft Delete</button>` : ''}
-          </td>
-        </tr>
-      `;
-    }).join('');
+    renderUsersTableRows(users, tbody, myRole);
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="7" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
+    if (!state.usersCache || state.usersCache.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
+    }
   }
 }
 
@@ -2428,14 +2450,14 @@ async function openRegisterUserModal() {
     if (regionWrapper) regionWrapper.classList.remove('hidden');
 
     const populateDropdowns = (regions, groups) => {
-      if (regionSelect && regions) {
+      if (regionSelect && regions && regions.length > 0) {
         regionSelect.innerHTML =
           '<option value="">-- Pilih Wilayah / Region --</option>' +
           (regions || [])
             .map((r) => `<option value="${r.id}">${escapeHtml(r.name)} (${escapeHtml(r.code)})</option>`)
             .join('');
       }
-      if (groups) {
+      if (groups && groups.length > 0) {
         const managedGroupSelect = document.getElementById('reg-managed-group');
         const userGroupSelect = document.getElementById('reg-user-group');
         const optionsHtml =
@@ -2451,16 +2473,20 @@ async function openRegisterUserModal() {
       }
     };
 
-    // If cached, render immediately without waiting for network!
-    if (state.regionsCache && state.allGroupsCache) {
-      populateDropdowns(state.regionsCache, state.allGroupsCache);
-    } else {
-      if (regionSelect) regionSelect.innerHTML = '<option value="">Memuat wilayah...</option>';
+    // Render immediately from cache/available state without waiting for network!
+    const initialGroups = state.allGroupsCache || state.groups || [];
+    const initialRegions = state.regionsCache || [];
+    populateDropdowns(initialRegions, initialGroups);
+
+    if (!initialRegions.length && regionSelect) {
+      regionSelect.innerHTML = '<option value="">Memuat wilayah...</option>';
+    }
+    if (!initialGroups.length) {
       const managedGroupSelect = document.getElementById('reg-managed-group');
       if (managedGroupSelect) managedGroupSelect.innerHTML = '<option value="">Memuat grup...</option>';
     }
 
-    // Fetch in parallel using Promise.all (non-blocking)
+    // Fetch latest in parallel without blocking UI
     Promise.all([
       state.regionsCache ? Promise.resolve(state.regionsCache) : api.getRegions().catch(() => []),
       state.allGroupsCache ? Promise.resolve(state.allGroupsCache) : api.getAllGroups().catch(() => []),
@@ -2824,13 +2850,8 @@ async function openAssignRegionAdminModal(regionId, regionName) {
   document.getElementById('assign-region-title').textContent = `Wilayah: ${regionName} (Tepat 1 Admin - BR-TENANT-01)`;
 
   const selectUser = document.getElementById('select-region-admin-user');
-  selectUser.innerHTML = '<option value="">Memuat daftar user...</option>';
 
-  openModal('modal-assign-region-admin');
-
-  try {
-    const users = await api.getUsers(false);
-    // Filter eligible users: not super admin
+  const populateEligibleUsers = (users) => {
     const eligible = (users || []).filter((u) => u.biodata?.role !== 'SUPER_ADMIN');
     selectUser.innerHTML =
       '<option value="">-- Pilih Pengguna untuk Dijadikan Region Admin --</option>' +
@@ -2841,8 +2862,25 @@ async function openAssignRegionAdminModal(regionId, regionName) {
           return `<option value="${u.id}">${escapeHtml(uName)} (${escapeHtml(u.email)})${currentRegion}</option>`;
         })
         .join('');
+  };
+
+  // If cached, render immediately without waiting for network!
+  if (state.usersCache && state.usersCache.length > 0) {
+    populateEligibleUsers(state.usersCache);
+  } else {
+    selectUser.innerHTML = '<option value="">Memuat daftar user...</option>';
+  }
+
+  openModal('modal-assign-region-admin');
+
+  try {
+    const users = await api.getUsers(false);
+    state.usersCache = users;
+    populateEligibleUsers(users);
   } catch (err) {
-    selectUser.innerHTML = `<option value="">Gagal memuat pengguna: ${escapeHtml(err.message)}</option>`;
+    if (!state.usersCache || state.usersCache.length === 0) {
+      selectUser.innerHTML = `<option value="">Gagal memuat pengguna: ${escapeHtml(err.message)}</option>`;
+    }
   }
 }
 
