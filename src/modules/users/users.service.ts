@@ -48,13 +48,21 @@ export class UsersService {
       },
     });
 
+    let isReactivating = false;
+
     if (existing) {
       if (existing.deleted_at) {
-        throw new ConflictException(
-          `Email "${normalizedEmail}" sudah pernah terdaftar (status terhapus / nonaktif). Silakan gunakan email lain atau pulihkan pengguna di tabel Manajemen Pengguna.`,
-        );
+        if (creatorRole === Role.SUPER_ADMIN) {
+          // Super Admin is permitted to re-register / reactivate accounts that were soft-deleted
+          isReactivating = true;
+        } else {
+          throw new ConflictException(
+            `Email "${normalizedEmail}" sudah pernah terdaftar (status terhapus / nonaktif). Hanya Super Admin yang berhak mendaftarkan kembali akun dengan email ini.`,
+          );
+        }
+      } else {
+        throw new ConflictException(`Email "${normalizedEmail}" sudah terdaftar aktif. Silakan gunakan email lain.`);
       }
-      throw new ConflictException(`Email "${normalizedEmail}" sudah terdaftar. Silakan gunakan email lain.`);
     }
 
     let targetRole: Role = dto.role || Role.USER;
@@ -161,24 +169,36 @@ export class UsersService {
 
     const hashedPassword = await PasswordUtil.hash(dto.password);
 
-    // Create user with biodata and region relations
+    // Create user with biodata and region relations (or reactivate if soft-deleted by Super Admin)
     let user;
-    try {
-      user = await this.prisma.user.create({
+    if (isReactivating && existing) {
+      user = await this.prisma.user.update({
+        where: { id: existing.id },
         data: {
           email: normalizedEmail,
           password: hashedPassword,
+          deleted_at: null, // Clear soft-deleted timestamp!
           region_id: targetRegionId,
           managed_region_id: targetManagedRegionId,
           managed_group_id: targetManagedGroupId,
           biodata: {
-            create: {
-              first_name: dto.first_name,
-              last_name: dto.last_name,
-              bio: dto.bio || null,
-              phone: dto.phone || null,
-              role: targetRole,
-              is_active: true,
+            upsert: {
+              create: {
+                first_name: dto.first_name,
+                last_name: dto.last_name,
+                bio: dto.bio || null,
+                phone: dto.phone || null,
+                role: targetRole,
+                is_active: true,
+              },
+              update: {
+                first_name: dto.first_name,
+                last_name: dto.last_name,
+                bio: dto.bio || null,
+                phone: dto.phone || null,
+                role: targetRole,
+                is_active: true,
+              },
             },
           },
         },
@@ -189,11 +209,39 @@ export class UsersService {
           managed_group: { select: { id: true, name: true } },
         },
       });
-    } catch (err: any) {
-      if (err.code === 'P2002' || err.message?.includes('Unique constraint')) {
-        throw new ConflictException(`Email "${normalizedEmail}" sudah terdaftar. Silakan gunakan email lain.`);
+    } else {
+      try {
+        user = await this.prisma.user.create({
+          data: {
+            email: normalizedEmail,
+            password: hashedPassword,
+            region_id: targetRegionId,
+            managed_region_id: targetManagedRegionId,
+            managed_group_id: targetManagedGroupId,
+            biodata: {
+              create: {
+                first_name: dto.first_name,
+                last_name: dto.last_name,
+                bio: dto.bio || null,
+                phone: dto.phone || null,
+                role: targetRole,
+                is_active: true,
+              },
+            },
+          },
+          include: {
+            biodata: true,
+            region: { select: { id: true, name: true, code: true } },
+            managed_region: { select: { id: true, name: true, code: true } },
+            managed_group: { select: { id: true, name: true } },
+          },
+        });
+      } catch (err: any) {
+        if (err.code === 'P2002' || err.message?.includes('Unique constraint')) {
+          throw new ConflictException(`Email "${normalizedEmail}" sudah terdaftar. Silakan gunakan email lain.`);
+        }
+        throw err;
       }
-      throw err;
     }
 
     // Auto-enroll user into target group if applicable
