@@ -36,13 +36,25 @@ export class UsersService {
   async createUser(creatorUser: any, dto: CreateUserDto) {
     const creatorRole: Role = creatorUser?.role || creatorUser?.biodata?.role;
 
-    // Check email existence
+    const normalizedEmail = dto.email.trim().toLowerCase();
+
+    // Check email existence across all records (including soft-deleted) because table constraint is UNIQUE
     const existing = await this.prisma.user.findFirst({
-      where: { email: dto.email, deleted_at: null },
+      where: {
+        email: {
+          equals: normalizedEmail,
+          mode: 'insensitive',
+        },
+      },
     });
 
     if (existing) {
-      throw new ConflictException('Email already registered');
+      if (existing.deleted_at) {
+        throw new ConflictException(
+          `Email "${normalizedEmail}" sudah pernah terdaftar (status terhapus / nonaktif). Silakan gunakan email lain atau pulihkan pengguna di tabel Manajemen Pengguna.`,
+        );
+      }
+      throw new ConflictException(`Email "${normalizedEmail}" sudah terdaftar. Silakan gunakan email lain.`);
     }
 
     let targetRole: Role = dto.role || Role.USER;
@@ -150,31 +162,39 @@ export class UsersService {
     const hashedPassword = await PasswordUtil.hash(dto.password);
 
     // Create user with biodata and region relations
-    const user = await this.prisma.user.create({
-      data: {
-        email: dto.email,
-        password: hashedPassword,
-        region_id: targetRegionId,
-        managed_region_id: targetManagedRegionId,
-        managed_group_id: targetManagedGroupId,
-        biodata: {
-          create: {
-            first_name: dto.first_name,
-            last_name: dto.last_name,
-            bio: dto.bio || null,
-            phone: dto.phone || null,
-            role: targetRole,
-            is_active: true,
+    let user;
+    try {
+      user = await this.prisma.user.create({
+        data: {
+          email: normalizedEmail,
+          password: hashedPassword,
+          region_id: targetRegionId,
+          managed_region_id: targetManagedRegionId,
+          managed_group_id: targetManagedGroupId,
+          biodata: {
+            create: {
+              first_name: dto.first_name,
+              last_name: dto.last_name,
+              bio: dto.bio || null,
+              phone: dto.phone || null,
+              role: targetRole,
+              is_active: true,
+            },
           },
         },
-      },
-      include: {
-        biodata: true,
-        region: { select: { id: true, name: true, code: true } },
-        managed_region: { select: { id: true, name: true, code: true } },
-        managed_group: { select: { id: true, name: true } },
-      },
-    });
+        include: {
+          biodata: true,
+          region: { select: { id: true, name: true, code: true } },
+          managed_region: { select: { id: true, name: true, code: true } },
+          managed_group: { select: { id: true, name: true } },
+        },
+      });
+    } catch (err: any) {
+      if (err.code === 'P2002' || err.message?.includes('Unique constraint')) {
+        throw new ConflictException(`Email "${normalizedEmail}" sudah terdaftar. Silakan gunakan email lain.`);
+      }
+      throw err;
+    }
 
     // Auto-enroll user into target group if applicable
     if (enrollGroupId) {

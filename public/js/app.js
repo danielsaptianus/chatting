@@ -2547,7 +2547,7 @@ async function handleAdminRegisterUser(e) {
   e.preventDefault();
   const firstName = document.getElementById('reg-firstname').value.trim();
   const lastName = document.getElementById('reg-lastname').value.trim();
-  const email = document.getElementById('reg-email').value.trim();
+  const email = document.getElementById('reg-email').value.trim().toLowerCase();
   const password = document.getElementById('reg-password').value;
   const phone = document.getElementById('reg-phone')?.value.trim() || undefined;
   const bio = document.getElementById('reg-bio')?.value.trim() || undefined;
